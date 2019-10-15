@@ -6,13 +6,13 @@
 
 var app = require('../app');
 var debug = require('debug')('rest-test:server');
-var http = brequire('http');
+var http = require('http');
 
 /**
  * Get port from environment and store in Express.
  */
 
-var port = normalizePort(process.env.PORT || '8081');
+var port = normalizePort(process.env.PORT || '8080');
 app.set('port', port);
 
 /**
