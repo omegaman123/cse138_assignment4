@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const logger = require('morgan');
+const axios = require('axios');
 
 const app = express();
 
@@ -18,18 +19,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.listen(13800);
 
 let keyv = {};
-keyv["hi"] = "foo";
 
-app.get('/hello', (req, res) => {
-    res.json = {"message": "Added successfully", "replaced": false};
-    console.log(res.json);
-    res.send("Hello, world!");
-});
+console.log(process.env.FORWARDING_ADDRESS);
+const FORWARDING_IP = process.env.FORWARDING_ADDRESS;
+
 
 app.put('/kv-store/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
     console.log("KEY: " + req.params.key);
     console.log("VALUE: " + req.body.value);
+    let key = req.params.key;
+    let val = req.body.value;
+
+    if (FORWARDING_IP !== undefined) {
+        axios.get(FORWARDING_IP + '/kv-store/' + key).then(
+            response => {
+            console.log(response);
+    });
+
+        }
     if (req.body.value === undefined) {
         console.log("val undef.");
         res.status(400);
@@ -37,72 +45,97 @@ app.put('/kv-store/:key', (req, res) => {
         return;
     } else if (req.params.key.length > 50) {
         res.status(400);
-        res.send({"error": "Key is too long", "message": "Error in PUT"});
+         res.send({"error": "Key is too long", "message": "Error in PUT"});
         return;
     }
 
-    if (keyv[req.params.key] !== undefined){
+
+    if (keyv[req.params.key] !== undefined) {
         keyv[req.params.key] = req.body.value;
         res.status(200);
-        res.send({"message":"Updated successfully","replaced":true});
+        res.send({"message": "Updated successfully", "replaced": true});
         return;
     }
     keyv[req.params.key] = req.body.value;
     res.status(201);
     let msg = {"message": "Added successfully", "replaced": false};
     res.send(msg);
-});
+    });
 
 app.get('/kv-store/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
     console.log("KEY: " + req.params.key);
     console.log("VALUE: " + keyv[req.params.key]);
+    let key = req.params.key;
+    let val = req.body.value;
+    console.log(FORWARDING_IP);
 
-    if (keyv[req.params.key]===undefined){
-        res.status(404);
-        res.send({"doesExist":false,"error":"Key does not exist","message":"Error in GET"});
+    if (FORWARDING_IP !== undefined) {
+        console.log("requesting from main");
+        axios.get('http://' + FORWARDING_IP + '/kv-store/' + key).then(
+            response => {
+            console.log(response)
+                }).catch(
+                    error =>{
+                    console.log("ERR" + error);
+                    res.status(404);
+                    res.send({"doesExist":false,"error":"Key does not exist","message":"Error in GET"});
+            });
         return;
-    }
-        res.status(200);
-        let val = keyv[req.params.key];
-        res.send({"doesExist":true,"message":"Retrieved successfully","value":val})
-});
+        }
 
-app.delete('/kv-store/:key',(req,res) => {
-    console.log('\n' + req.method + ": ");
-    console.log("KEY: " + req.params.key);
-    console.log("VALUE: " + keyv[req.params.key]);
 
-    if (keyv[req.params.key]===undefined){
+    if (keyv[req.params.key] === undefined) {
         res.status(404);
-        res.send({"doesExist":false,"error":"Key does not exist","message":"Error in DELETE"});
+        res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in GET"});
         return;
     }
     res.status(200);
-    delete keyv[req.params.key];
-    res.send({"doesExist":true,"message":"Deleted successfully"})
-
-
+    val = keyv[req.params.key];
+    res.send({"doesExist": true, "message": "Retrieved successfully", "value": val})
 });
+
+app.delete('/kv-store/:key', (req, res) => {
+    console.log('\n' + req.method + ": ");
+console.log("KEY: " + req.params.key);
+console.log("VALUE: " + keyv[req.params.key]);
+
+if (keyv[req.params.key] === undefined) {
+    res.status(404);
+    res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in DELETE"});
+    return;
+}
+res.status(200);
+delete keyv[req.params.key];
+res.send({"doesExist": true, "message": "Deleted successfully"})
+
+
+})
+;
 
 app.post('/hello', (req, res) => {
     res.status(405);
-    res.send("This method is unsupported");
-});
+res.send("This method is unsupported");
+})
+;
 
 app.post('/check', (req, res) => {
-    if (req.query.msg === undefined) {
-        res.status(405);
-        res.send("This method is unsupported");
-        return;
-    }
-    res.send("POST message received: " + req.query.msg);
-});
+    if(req.query.msg === undefined
+)
+{
+    res.status(405);
+    res.send("This method is unsupported");
+    return;
+}
+res.send("POST message received: " + req.query.msg);
+})
+;
 
 app.get('/check', (req, res) => {
     res.send("GET message received");
 
-});
+})
+;
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
