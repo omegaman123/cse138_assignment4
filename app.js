@@ -31,13 +31,55 @@ app.put('/kv-store/:key', (req, res) => {
     let key = req.params.key;
     let val = req.body.value;
 
-    if (FORWARDING_IP !== undefined) {
-        axios.get(FORWARDING_IP + '/kv-store/' + key).then(
-            response => {
-            console.log(response);
-    });
 
+    if (FORWARDING_IP !== undefined) {
+        console.log("requesting from main");
+        if (req.body.value === undefined) {
+            console.log("val undef.");
+            res.status(400);
+            res.send({"error": "Value is missing", "message": "Error in PUT"});
+            return;
+        } else if (req.params.key.length > 50) {
+            res.status(400);
+            res.send({"error": "Key is too long", "message": "Error in PUT"});
+            return;
         }
+
+        axios.put('http://' + FORWARDING_IP + '/kv-store/' + key,{
+            "value":val
+    }).then(
+        response => {
+        // console.log(response);
+        res.send(response.data);
+        return;
+    }).catch( error => {
+            if (error.response) {
+            // The request was made and the server responded with a status code
+            // that falls out of the range of 2xx
+            // console.log(error.response.data);
+            // console.log(error.response.status);
+            // console.log(error.response.headers);
+            res.status(error.response.status);
+            res.send(error.response.data);
+        } else if (error.request) {
+            // The request was made but no response was received
+            // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+            // http.ClientRequest in node.js
+            console.log(error.request);
+            res.status(503);
+            res.send({"error":"Main instance is down","message":"Error in PUT"});
+        } else {
+            // Something happened in setting up the request that triggered an Error
+            console.log('Error', error.message);
+            res.send(error.message);
+        }
+        console.log(error.config);
+
+    });
+     return;
+    }
+
+
     if (req.body.value === undefined) {
         console.log("val undef.");
         res.status(400);
@@ -68,18 +110,38 @@ app.get('/kv-store/:key', (req, res) => {
     console.log("VALUE: " + keyv[req.params.key]);
     let key = req.params.key;
     let val = req.body.value;
-    console.log(FORWARDING_IP);
+    console.log("IP: " + FORWARDING_IP);
 
     if (FORWARDING_IP !== undefined) {
         console.log("requesting from main");
         axios.get('http://' + FORWARDING_IP + '/kv-store/' + key).then(
             response => {
-            console.log(response)
-                }).catch(
-                    error =>{
-                    console.log("ERR" + error);
-                    res.status(404);
-                    res.send({"doesExist":false,"error":"Key does not exist","message":"Error in GET"});
+            // console.log(response);
+            res.send(response.data);
+            return;
+                }).catch( error => {
+            if (error.response) {
+                // The request was made and the server responded with a status code
+                // that falls out of the range of 2xx
+                // console.log(error.response.data);
+                // console.log(error.response.status);
+                // console.log(error.response.headers);
+                res.status(error.response.status);
+                res.send(error.response.data);
+            } else if (error.request) {
+                // The request was made but no response was received
+                // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+                // http.ClientRequest in node.js
+                console.log(error.request);
+                res.status(503);
+                res.send({"error":"Main instance is down","message":"Error in GET"});
+            } else {
+                // Something happened in setting up the request that triggered an Error
+                console.log('Error', error.message);
+                res.send(error.message);
+            }
+            console.log(error.config);
+
             });
         return;
         }
@@ -97,45 +159,53 @@ app.get('/kv-store/:key', (req, res) => {
 
 app.delete('/kv-store/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
-console.log("KEY: " + req.params.key);
-console.log("VALUE: " + keyv[req.params.key]);
+    console.log("KEY: " + req.params.key);
+    console.log("VALUE: " + keyv[req.params.key]);
+    let key = req.params.key;
+    let val = req.body.value;
 
-if (keyv[req.params.key] === undefined) {
-    res.status(404);
-    res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in DELETE"});
-    return;
-}
-res.status(200);
-delete keyv[req.params.key];
-res.send({"doesExist": true, "message": "Deleted successfully"})
+    if (FORWARDING_IP !== undefined) {
+        console.log("requesting from main");
+        axios.delete('http://' + FORWARDING_IP + '/kv-store/' + key).then(
+            response => {
+            // console.log(response);
+            res.send(response.data);
+        return;
+    }).catch( error => {
+            if (error.response) {
+            // The request was made and the server responded with a status code
+            // that falls out of the range of 2xx
+            res.status(error.response.status);
+            res.send(error.response.data);
+        } else if (error.request) {
+            // The request was made but no response was received
+            // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+            // http.ClientRequest in node.js
+            //console.log(error.request);
+            res.status(503);
+            res.send({"error":"Main instance is down","message":"Error in DELETE"});
+        } else {
+            // Something happened in setting up the request that triggered an Error
+            console.log('Error', error.message);
+            res.send(error.message);
+        }
+        //console.log(error.config);
+    });
+        return;
+    }
+
+    if (keyv[req.params.key] === undefined) {
+        res.status(404);
+        res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in DELETE"});
+        return;
+    }
+    res.status(200);
+    delete keyv[req.params.key];
+    res.send({"doesExist": true, "message": "Deleted successfully"})
 
 
-})
-;
+    });
 
-app.post('/hello', (req, res) => {
-    res.status(405);
-res.send("This method is unsupported");
-})
-;
-
-app.post('/check', (req, res) => {
-    if(req.query.msg === undefined
-)
-{
-    res.status(405);
-    res.send("This method is unsupported");
-    return;
-}
-res.send("POST message received: " + req.query.msg);
-})
-;
-
-app.get('/check', (req, res) => {
-    res.send("GET message received");
-
-})
-;
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
