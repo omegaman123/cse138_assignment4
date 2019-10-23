@@ -24,13 +24,49 @@ console.log(process.env.FORWARDING_ADDRESS);
 const FORWARDING_IP = process.env.FORWARDING_ADDRESS;
 
 
+
+app.get('/kv-store/', (req, res) =>{
+    if (FORWARDING_IP !== undefined) {
+    console.log("requesting from main");
+    axios.get('http://' + FORWARDING_IP + '/kv-store/').then(
+        response => {
+        // console.log(response);
+        res.send(response);
+    return;
+    }).catch( error => {
+            if (error.response) {
+            // The request was made and the server responded with a status code
+            // that falls out of the range of 2xx
+            res.status(error.response.status);
+            res.send(error.response.data);
+        } else if (error.request) {
+            // The request was made but no response was received
+            // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+            // http.ClientRequest in node.js
+            console.log(error.request);
+            res.status(503);
+            res.send({"error":"Main instance is down","message":"Error in GET"});
+        } else {
+            // Something happened in setting up the request that triggered an Error
+            console.log('Error', error.message);
+            res.send(error.message);
+        }
+    console.log(error.config);
+
+    });
+        return;
+    }
+
+    res.send(keyv);
+});
+
+
 app.put('/kv-store/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
     console.log("KEY: " + req.params.key);
     console.log("VALUE: " + req.body.value);
     let key = req.params.key;
     let val = req.body.value;
-
 
     if (FORWARDING_IP !== undefined) {
         console.log("requesting from main");
@@ -54,22 +90,13 @@ app.put('/kv-store/:key', (req, res) => {
         return;
     }).catch( error => {
             if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
-            // console.log(error.response.data);
-            // console.log(error.response.status);
-            // console.log(error.response.headers);
             res.status(error.response.status);
             res.send(error.response.data);
         } else if (error.request) {
-            // The request was made but no response was received
-            // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
-            // http.ClientRequest in node.js
             console.log(error.request);
             res.status(503);
             res.send({"error":"Main instance is down","message":"Error in PUT"});
         } else {
-            // Something happened in setting up the request that triggered an Error
             console.log('Error', error.message);
             res.send(error.message);
         }
@@ -90,7 +117,6 @@ app.put('/kv-store/:key', (req, res) => {
          res.send({"error": "Key is too long", "message": "Error in PUT"});
         return;
     }
-
 
     if (keyv[req.params.key] !== undefined) {
         keyv[req.params.key] = req.body.value;
@@ -123,9 +149,6 @@ app.get('/kv-store/:key', (req, res) => {
             if (error.response) {
                 // The request was made and the server responded with a status code
                 // that falls out of the range of 2xx
-                // console.log(error.response.data);
-                // console.log(error.response.status);
-                // console.log(error.response.headers);
                 res.status(error.response.status);
                 res.send(error.response.data);
             } else if (error.request) {
