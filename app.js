@@ -25,25 +25,28 @@ const FORWARDING_IP = process.env.FORWARDING_ADDRESS;
 
 
 
-app.get('/kv-store/', (req, res) =>{
+app.get('/kv-store/', (req, res) => {
+
     if (FORWARDING_IP !== undefined) {
     console.log("requesting from main");
     axios.get('http://' + FORWARDING_IP + '/kv-store/').then(
         response => {
-        // console.log(response);
-        res.send(response);
+        console.log(response);
+        res.status(response.status);
+        res.send(response.data);
     return;
     }).catch( error => {
             if (error.response) {
             // The request was made and the server responded with a status code
             // that falls out of the range of 2xx
+            console.error(error.response);
             res.status(error.response.status);
             res.send(error.response.data);
         } else if (error.request) {
             // The request was made but no response was received
             // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
             // http.ClientRequest in node.js
-            console.log(error.request);
+            // console.log(error.request);
             res.status(503);
             res.send({"error":"Main instance is down","message":"Error in GET"});
         } else {
@@ -86,6 +89,7 @@ app.put('/kv-store/:key', (req, res) => {
     }).then(
         response => {
         // console.log(response);
+        res.status(response.status);
         res.send(response.data);
         return;
     }).catch( error => {
@@ -93,7 +97,7 @@ app.put('/kv-store/:key', (req, res) => {
             res.status(error.response.status);
             res.send(error.response.data);
         } else if (error.request) {
-            console.log(error.request);
+            //console.log(error.request);
             res.status(503);
             res.send({"error":"Main instance is down","message":"Error in PUT"});
         } else {
@@ -143,6 +147,7 @@ app.get('/kv-store/:key', (req, res) => {
         axios.get('http://' + FORWARDING_IP + '/kv-store/' + key).then(
             response => {
             // console.log(response);
+            res.status(response.status);
             res.send(response.data);
             return;
                 }).catch( error => {
@@ -155,7 +160,7 @@ app.get('/kv-store/:key', (req, res) => {
                 // The request was made but no response was received
                 // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
                 // http.ClientRequest in node.js
-                console.log(error.request);
+                //console.log(error.request);
                 res.status(503);
                 res.send({"error":"Main instance is down","message":"Error in GET"});
             } else {
@@ -192,6 +197,7 @@ app.delete('/kv-store/:key', (req, res) => {
         axios.delete('http://' + FORWARDING_IP + '/kv-store/' + key).then(
             response => {
             // console.log(response);
+            res.status(response.status);
             res.send(response.data);
         return;
     }).catch( error => {
