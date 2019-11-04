@@ -28,6 +28,13 @@ docker run --name="node2"        --net=kv_subnet     \
            kv-store:3.0
 
 
+docker run --name="node3"        --net=kv_subnet     \
+           --ip=10.10.0.4        -p 13804:13800      \
+           -e ADDRESS="${addr3}"                     \
+           -e VIEW=${full_view}                      \
+           kv-store:3.0
+
+
 #curl --request PUT                                   \
 #     --header "Content-Type: application/json"       \
 #     --data '{"view": "${full_view}"}'               \

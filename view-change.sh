@@ -9,6 +9,6 @@ full_view=${initial_full_view},${addr3}
 
 curl --request PUT                                   \
      --header "Content-Type: application/json"       \
-     --data '{"view":   "${full_view}"}'               \
+     --data '{"view": "10.10.0.2:13800,10.10.0.3:13800,10.10.0.4:13800"}'               \
      --write-out "%{http_code}\n"                    \
      http://localhost:13802/kv-store/view-change

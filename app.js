@@ -129,7 +129,7 @@ app.get('/kv-store/keys/:key', (req, res) => {
 
     if (target !== ADDR) {
         console.log("requesting from main");
-        axios.get('http://' + FORWARDING_IP + '/kv-store/' + key).then(
+        axios.get('http://' + target + '/kv-store/' + key).then(
             response => {
             // console.log(response);
             res.status(response.status);
@@ -185,7 +185,7 @@ app.delete('/kv-store/:key', (req, res) => {
 
     if (target !== ADDR) {
         console.log("requesting from main");
-        axios.delete('http://' + FORWARDING_IP + '/kv-store/' + key).then(
+        axios.delete('http://' + target + '/kv-store/' + key).then(
             response => {
             // console.log(response);
             res.status(response.status);
@@ -227,8 +227,96 @@ app.delete('/kv-store/:key', (req, res) => {
 
 app.put('/kv-store/view-change/', (req, res) => {
     let nView = req.body.view;
-    console.log(nView);
+    let nArr = funcs.strSpl(nView);
+    console.log("\nNEW VIEW: " + nView);
+    console.log("ARR: " + nArr);
+    console.log("LENGTH: " + nArr.length);
+    viewArr = nArr;
+    let resNum = 0;
+    console.log("VIEW CHANGE: " + viewArr);
 
+    if (req.body.proliferate === undefined && req.body.proliferate !== false) {
+        nArr.forEach(function (adr) {
+            console.log("ADR: " + adr);
+            if (adr === ADDR) {
+                return;
+            }
+                console.log("Sending to " + adr);
+                axios.put('http://' + adr + '/kv-store/view-change/',
+                    {"view": nView, "proliferate": false}).then(
+                    response => {
+                        //increment count for nodes
+                        resNum +=1;
+                        console.log(resNum);
+                        console.log("VC MSG: " + response.data);
+                    }).catch(error => {
+                    if (error.response) {
+                        // The request was made and the server responded with a status code
+                        // that falls out of the range of 2xx
+                        res.status(error.response.status);
+                        res.send(error.response.data);
+                    } else if (error.request) {
+                        // The request was made but no response was received
+                        // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+                        // http.ClientRequest in node.js
+                        //console.log(error.request);
+                        res.status(503);
+                        res.send({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
+                    } else {
+                        // Something happened in setting up the request that triggered an Error
+                        console.log('Error', error.message);
+                        res.send(error.message);
+                    }
+                    return;
+                });
+
+        });
+
+
+        nArr.forEach(function (adr) {
+        axios.put('http://' + adr + '/kv-store/rehash/', {"view":nArr}).then(
+            response => {
+                console.log("REHASH MSG: " + response.data);
+            }).catch(
+                error =>{
+                    if (error.response) {
+                        // The request was made and the server responded with a status code
+                        // that falls out of the range of 2xx
+                        res.status(error.response.status);
+                        res.send(error.response.data);
+                    } else if (error.request) {
+                        // The request was made but no response was received
+                        // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+                        // http.ClientRequest in node.js
+                        //console.log(error.request);
+                        res.status(503);
+                        res.send({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
+                    } else {
+                        // Something happened in setting up the request that triggered an Error
+                        console.log('Error', error.message);
+                        res.send(error.message);
+                    }
+                    return;
+                });
+        });
+    }
+
+res.send({"msg":"ok"});
+
+});
+
+app.put('/kv-store/rehash/', (req, res) => {
+if (req.body.view !== viewArr){
+    res.send({"msg":"Different view", "view": viewArr});
+    return;
+}
+
+console.log("blah: " + viewArr);
+keyv.forEach(function (key) {
+    console.log("KEy " + key);
+});
+
+res.send({"msg":"rehash ok"});
 });
 
 app.get('/kv-store/key-count',(req, res) =>{
