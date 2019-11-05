@@ -4,6 +4,7 @@ const path = require('path');
 const cookieParser = require('cookie-parser');
 const logger = require('morgan');
 const axios = require('axios');
+let EventEmitter = require('events');
 const funcs = require('./functions.js');
 
 const app = express();
@@ -23,6 +24,7 @@ let keyv = {};
 let viewArr = {};
 const ADDR = process.env.ADDRESS;
 let INITIAL_VIEW = process.env.VIEW;
+let ee = new EventEmitter();
 
 viewArr = funcs.strSpl(INITIAL_VIEW);
 console.log(typeof viewArr);
@@ -235,6 +237,13 @@ app.put('/kv-store/view-change/', (req, res) => {
     let resNum = 0;
     console.log("VIEW CHANGE: " + viewArr);
 
+    if (req.body.proliferate === false){
+        res.send({"ADR":ADDR,"VC":"OK"});
+        return;
+    }
+
+    let acks = {};
+
     if (req.body.proliferate === undefined && req.body.proliferate !== false) {
         nArr.forEach(function (adr) {
             console.log("ADR: " + adr);
@@ -246,9 +255,11 @@ app.put('/kv-store/view-change/', (req, res) => {
                     {"view": nView, "proliferate": false}).then(
                     response => {
                         //increment count for nodes
-                        resNum +=1;
-                        console.log(resNum);
-                        console.log("VC MSG: " + response.data);
+                        console.log("VC MSG: " + response.data.ADR + " " + response.data.VC);
+                        acks[response.data.ADR] = response.data.VC;
+                        if (Object.keys(acks).length === nArr.length - 1){
+                            ee.emit('message',nArr);
+                        }
                     }).catch(error => {
                     if (error.response) {
                         // The request was made and the server responded with a status code
@@ -267,43 +278,30 @@ app.put('/kv-store/view-change/', (req, res) => {
                         console.log('Error', error.message);
                         res.send(error.message);
                     }
-                    return;
-                });
-
-        });
-
-
-        nArr.forEach(function (adr) {
-        axios.put('http://' + adr + '/kv-store/rehash/', {"view":nArr}).then(
-            response => {
-                console.log("REHASH MSG: " + response.data);
-            }).catch(
-                error =>{
-                    if (error.response) {
-                        // The request was made and the server responded with a status code
-                        // that falls out of the range of 2xx
-                        res.status(error.response.status);
-                        res.send(error.response.data);
-                    } else if (error.request) {
-                        // The request was made but no response was received
-                        // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
-                        // http.ClientRequest in node.js
-                        //console.log(error.request);
-                        res.status(503);
-                        res.send({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
-                    } else {
-                        // Something happened in setting up the request that triggered an Error
-                        console.log('Error', error.message);
-                        res.send(error.message);
-                    }
-                    return;
                 });
         });
+
+        ee.on('rehash', function () {
+            console.log("rehash...");
+            res.send("Done rehash");
+        });
+
+        console.log(acks);
     }
 
-res.send({"msg":"ok"});
-
 });
+
+ee.on('message',function (arr) {
+console.log("EVENT MESSAGE: " + arr);
+
+
+
+
+ee.emit('rehash');
+});
+
+
+
 
 app.put('/kv-store/rehash/', (req, res) => {
 if (req.body.view !== viewArr){

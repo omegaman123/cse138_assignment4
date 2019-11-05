@@ -17,11 +17,10 @@ module.exports = {
         console.log("RES: " + res);
         return res;
     },
-    viewChange: function (view,nView) {
-     console.log("CURRENT: " + view);
-     console.log("NEW: " + nView)
-
+    sleep: function (ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
     }
+
 };
 
 String.prototype.hashCode = function(){
