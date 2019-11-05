@@ -234,7 +234,6 @@ app.put('/kv-store/view-change/', (req, res) => {
     console.log("ARR: " + nArr);
     console.log("LENGTH: " + nArr.length);
     viewArr = nArr;
-    let resNum = 0;
     console.log("VIEW CHANGE: " + viewArr);
 
     if (req.body.proliferate === false){
@@ -281,40 +280,91 @@ app.put('/kv-store/view-change/', (req, res) => {
                 });
         });
 
-        ee.on('rehash', function () {
+        ee.on('rehash', function (viewResult) {
             console.log("rehash...");
-            res.send("Done rehash");
+            viewResult[ADDR] = Object.keys(keyv).length;
+            res.send({"msg":"DONE REHASH","view":viewResult});
         });
-
-        console.log(acks);
     }
-
 });
 
 ee.on('message',function (arr) {
-console.log("EVENT MESSAGE: " + arr);
-
-
-
-
-ee.emit('rehash');
+console.log("\nEVENT MESSAGE: " + arr);
+let acks = {};
+let nodeKeyNum = {};
+arr.forEach(function (adr) {
+    console.log("Sending rehash GO AHEAD to " + adr);
+    axios.put('http://' + adr + '/kv-store/rehash/', {"view":arr}).then(
+        response => {
+        console.log("Sending rehash to " + adr + "...");
+         if (response.data.msg === "DONE"){
+             acks[adr] = response.data.msg;
+             nodeKeyNum[adr] = response.data.NUMKEYS;
+         }
+        if (Object.keys(acks).length === arr.length){
+            ee.emit('rehash',nodeKeyNum);
+        }
+        }).catch(
+            error => {
+                if (error.response) {
+                    // The request was made and the server responded with a status code
+                    // that falls out of the range of 2xx
+                    res.status(error.response.status);
+                    res.send(error.response.data);
+                } else if (error.request) {
+                    // The request was made but no response was received
+                    // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+                    // http.ClientRequest in node.js
+                    //console.log(error.request);
+                    res.status(503);
+                    res.send({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
+                } else {
+                    // Something happened in setting up the request that triggered an Error
+                    console.log('Error', error.message);
+                    res.send(error.message);
+                }
+            });
+    });
 });
 
 
 
 
 app.put('/kv-store/rehash/', (req, res) => {
-if (req.body.view !== viewArr){
-    res.send({"msg":"Different view", "view": viewArr});
-    return;
-}
+    let view = req.body.view;
+    console.log("\nREHASH WITH ARR " + view);
+    Object.keys(keyv).forEach(function (key) {
+       console.log("KEY: " + key + " VAL: " + keyv[key]);
 
-console.log("blah: " + viewArr);
-keyv.forEach(function (key) {
-    console.log("KEy " + key);
-});
+       let hash = key.hashCode();
+       let idx = hash%view.length;
+       let target = view[idx];
 
-res.send({"msg":"rehash ok"});
+       axios.put('http://' + target + '/kv-store/keys/' + key,{"value":keyv[key]}).then(
+           response => {
+               console.log(response.data);
+       }).catch(
+           error => {
+               if (error.response) {
+                   // The request was made and the server responded with a status code
+                   // that falls out of the range of 2xx
+                   res.status(error.response.status);
+                   res.send(error.response.data);
+               } else if (error.request) {
+                   // The request was made but no response was received
+                   // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+                   // http.ClientRequest in node.js
+                   //console.log(error.request);
+                   res.status(503);
+                   res.send({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
+               } else {
+                   // Something happened in setting up the request that triggered an Error
+                   console.log('Error', error.message);
+                   res.send(error.message);
+               }
+       });
+   });
+    res.send({"msg":"DONE"});
 });
 
 app.get('/kv-store/key-count',(req, res) =>{

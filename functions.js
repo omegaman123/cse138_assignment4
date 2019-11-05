@@ -20,7 +20,6 @@ module.exports = {
     sleep: function (ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
     }
-
 };
 
 String.prototype.hashCode = function(){
