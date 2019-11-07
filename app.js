@@ -25,6 +25,7 @@ let viewArr = {};
 const ADDR = process.env.ADDRESS;
 let INITIAL_VIEW = process.env.VIEW;
 let ee = new EventEmitter();
+let n = 0;
 
 viewArr = funcs.strSpl(INITIAL_VIEW);
 console.log(typeof viewArr);
@@ -71,8 +72,13 @@ app.put('/kv-store/keys/:key', (req, res) => {
     }).then(
         response => {
         // console.log(response);
-        res.status(response.status);
-        res.send(response.data);
+            res.status(response.status);
+        if (response.data.replaced === true) {
+            res.send({"message": "Added successfully", "replaced": true,"address":target})
+        } else {
+            res.send({"message": "Added successfully", "replaced": false,"address":target})
+        }
+
     }).catch( error => {
             if (error.response) {
             res.status(error.response.status);
@@ -230,6 +236,8 @@ app.delete('/kv-store/:key', (req, res) => {
 app.put('/kv-store/view-change/', (req, res) => {
     let nView = req.body.view;
     let nArr = funcs.strSpl(nView);
+
+
     console.log("\nNEW VIEW: " + nView);
     console.log("ARR: " + nArr);
     console.log("LENGTH: " + nArr.length);
@@ -237,6 +245,7 @@ app.put('/kv-store/view-change/', (req, res) => {
     console.log("VIEW CHANGE: " + viewArr);
 
     if (req.body.proliferate === false){
+        console.log("PROLIF: FALSE");
         res.send({"ADR":ADDR,"VC":"OK"});
         return;
     }
@@ -257,7 +266,7 @@ app.put('/kv-store/view-change/', (req, res) => {
                         console.log("VC MSG: " + response.data.ADR + " " + response.data.VC);
                         acks[response.data.ADR] = response.data.VC;
                         if (Object.keys(acks).length === nArr.length - 1){
-                            ee.emit('message',nArr);
+                            ee.emit('message', nArr);
                         }
                     }).catch(error => {
                     if (error.response) {
@@ -280,10 +289,18 @@ app.put('/kv-store/view-change/', (req, res) => {
                 });
         });
 
-        ee.on('rehash', function (viewResult) {
-            console.log("rehash...");
-            viewResult[ADDR] = Object.keys(keyv).length;
-            res.send({"msg":"DONE REHASH","view":viewResult});
+        ee.once('rehash', function (viewResult) {
+            console.log("rehash done...");
+            try {
+                res.send({"msg":"DONE REHASH", "n":n++});
+                console.log("After res.send()");
+
+            } catch (e) {
+                console.log("EXCEPTION : " + e.stack);
+            }
+
+            console.log("After Try Catch.");
+            console.log("EE LISTENERS: " + ee.listeners());
         });
     }
 });
@@ -292,36 +309,40 @@ ee.on('message',function (arr) {
 console.log("\nEVENT MESSAGE: " + arr);
 let acks = {};
 let nodeKeyNum = {};
+
 arr.forEach(function (adr) {
     console.log("Sending rehash GO AHEAD to " + adr);
     axios.put('http://' + adr + '/kv-store/rehash/', {"view":arr}).then(
         response => {
-        console.log("Sending rehash to " + adr + "...");
+        console.log("REHASH MSG : " + adr + " - " + response.data.msg);
          if (response.data.msg === "DONE"){
              acks[adr] = response.data.msg;
              nodeKeyNum[adr] = response.data.NUMKEYS;
          }
         if (Object.keys(acks).length === arr.length){
-            ee.emit('rehash',nodeKeyNum);
+            console.log("ACKS: " + acks);
+            console.log("Emitting event rehash...");
+            ee.emit('rehash', nodeKeyNum);
         }
         }).catch(
             error => {
+                console.log("ee.on message ADR: " + adr);
                 if (error.response) {
                     // The request was made and the server responded with a status code
                     // that falls out of the range of 2xx
-                    res.status(error.response.status);
-                    res.send(error.response.data);
+                    console.log(error.response.data);
+                    // res.send(error.response.data);
                 } else if (error.request) {
                     // The request was made but no response was received
                     // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
                     // http.ClientRequest in node.js
                     //console.log(error.request);
-                    res.status(503);
-                    res.send({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
+                    console.log({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
+
                 } else {
                     // Something happened in setting up the request that triggered an Error
                     console.log('Error', error.message);
-                    res.send(error.message);
+
                 }
             });
     });
@@ -333,6 +354,7 @@ arr.forEach(function (adr) {
 app.put('/kv-store/rehash/', (req, res) => {
     let view = req.body.view;
     console.log("\nREHASH WITH ARR " + view);
+
     Object.keys(keyv).forEach(function (key) {
        console.log("KEY: " + key + " VAL: " + keyv[key]);
 
@@ -340,9 +362,13 @@ app.put('/kv-store/rehash/', (req, res) => {
        let idx = hash%view.length;
        let target = view[idx];
 
-       axios.put('http://' + target + '/kv-store/keys/' + key,{"value":keyv[key]}).then(
+       if (target === ADDR){
+           return;
+       }
+       axios.put('http://' + target + '/kv-store/keys/' + key, {"value":keyv[key]}).then(
            response => {
                console.log(response.data);
+               delete keyv[key];
        }).catch(
            error => {
                if (error.response) {
@@ -364,7 +390,7 @@ app.put('/kv-store/rehash/', (req, res) => {
                }
        });
    });
-    res.send({"msg":"DONE"});
+    res.send({"msg":"DONE","NUMKEYS":Object.keys(keyv).length});
 });
 
 app.get('/kv-store/key-count',(req, res) =>{
