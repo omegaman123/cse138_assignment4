@@ -10,6 +10,7 @@ path_to_dockerfile="."
 addr1="10.10.0.2:13800"
 addr2="10.10.0.3:13800"
 addr3="10.10.0.4:13800"
+addr4="10.10.0.5:13800"
 
 # convenience variables
 initial_full_view="${addr1},${addr2}"
@@ -33,6 +34,14 @@ docker run --name="node3"        --net=kv_subnet     \
            -e ADDRESS="${addr3}"                     \
            -e VIEW=${full_view}                      \
            kv-store:3.0
+
+
+#docker run --name="node4"        --net=kv_subnet     \
+#           --ip=10.10.0.5        -p 13805:13800      \
+#           -e ADDRESS="${addr4}"                     \
+#           -e VIEW=${addr4}                          \
+#           kv-store:3.0
+
 
 
 #curl --request PUT                                   \

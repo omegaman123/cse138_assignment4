@@ -121,6 +121,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
     res.send(msg);
     });
 
+//GET Request end point
 app.get('/kv-store/keys/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
     console.log("KEY: " + req.params.key);
@@ -136,12 +137,16 @@ app.get('/kv-store/keys/:key', (req, res) => {
     let target = viewArr[idx];
 
     if (target !== ADDR) {
-        console.log("requesting from main");
-        axios.get('http://' + target + '/kv-store/' + key).then(
+        console.log("requesting from proper node");
+        axios.get('http://' + target + '/kv-store/keys/' + key).then(
             response => {
             // console.log(response);
-            res.status(response.status);
-            res.send(response.data);
+                if (response.data.doesExist === true){
+                    res.send(   {"doesExist": true,
+                                "message":"Retrieved successfully",
+                                "value":response.data.value,
+                                "address":target});
+                }
                 }).catch( error => {
             if (error.response) {
                 // The request was made and the server responded with a status code
@@ -177,7 +182,7 @@ app.get('/kv-store/keys/:key', (req, res) => {
     res.send({"doesExist": true, "message": "Retrieved successfully", "value": val})
 });
 
-app.delete('/kv-store/:key', (req, res) => {
+app.delete('/kv-store/keys/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
     console.log("KEY: " + req.params.key);
     console.log("VALUE: " + keyv[req.params.key]);
@@ -191,13 +196,16 @@ app.delete('/kv-store/:key', (req, res) => {
     console.log("TARGET: " + viewArr[idx]);
     let target = viewArr[idx];
 
+    //IF hash function target does not belong to current node, send to appropriate node in view
     if (target !== ADDR) {
-        console.log("requesting from main");
+        console.log("requesting from other node");
         axios.delete('http://' + target + '/kv-store/' + key).then(
             response => {
             // console.log(response);
             res.status(response.status);
-            res.send(response.data);
+            if (response.data.doesExist === true){
+                res.send({"doesExist":true,"message":"Deleted successfully","address":target})
+            }
     }).catch( error => {
             if (error.response) {
             // The request was made and the server responded with a status code
@@ -233,17 +241,20 @@ app.delete('/kv-store/:key', (req, res) => {
 
     });
 
+//Endpoint handling view changes, expects JSON object with 'view' field.
 app.put('/kv-store/view-change/', (req, res) => {
     let nView = req.body.view;
     let nArr = funcs.strSpl(nView);
 
-
+    //Split view into array and replace own view with new one
     console.log("\nNEW VIEW: " + nView);
     console.log("ARR: " + nArr);
     console.log("LENGTH: " + nArr.length);
     viewArr = nArr;
     console.log("VIEW CHANGE: " + viewArr);
 
+    //Check if view change message is to be proliferated to other nodes
+    //Will be false if receiving view change message from other node
     if (req.body.proliferate === false){
         console.log("PROLIF: FALSE");
         res.send({"ADR":ADDR,"VC":"OK"});
@@ -252,22 +263,29 @@ app.put('/kv-store/view-change/', (req, res) => {
 
     let acks = {};
 
+    //If receiving view change from client, begin process for sending out view change to all nodes in view.
     if (req.body.proliferate === undefined && req.body.proliferate !== false) {
         nArr.forEach(function (adr) {
             console.log("ADR: " + adr);
+            //Skip sending view to self
             if (adr === ADDR) {
                 return;
             }
                 console.log("Sending to " + adr);
+                //Send view change to viewchange endpoint for other nodes, attaching proliferate:false to prevent
+                // other nodes from sending out view change upon receiving it
                 axios.put('http://' + adr + '/kv-store/view-change/',
                     {"view": nView, "proliferate": false}).then(
                     response => {
                         //increment count for nodes
                         console.log("VC MSG: " + response.data.ADR + " " + response.data.VC);
                         acks[response.data.ADR] = response.data.VC;
+                        // Count the number of acknowledgements received, upon receiving all except own, emit event to
+                        // trigger rehash across all nodes.
                         if (Object.keys(acks).length === nArr.length - 1){
                             ee.emit('message', nArr);
                         }
+                        //catch any errors from messages and return appropriate response
                     }).catch(error => {
                     if (error.response) {
                         // The request was made and the server responded with a status code
@@ -289,40 +307,42 @@ app.put('/kv-store/view-change/', (req, res) => {
                 });
         });
 
+        // Once rehash is done, finally return back to the client. ee.once is used to avoid duplicate event listeners
         ee.once('rehash', function (viewResult) {
             console.log("rehash done...");
             try {
-                res.send({"msg":"DONE REHASH", "n":n++});
-                console.log("After res.send()");
+
+                res.send({"msg":"DONE REHASH"});
+
 
             } catch (e) {
                 console.log("EXCEPTION : " + e.stack);
             }
 
-            console.log("After Try Catch.");
-            console.log("EE LISTENERS: " + ee.listeners());
         });
     }
 });
 
+// Upon receiving all acknowledgements regarding view change, begin to send out go ahead for rehashing of keys.
 ee.on('message',function (arr) {
 console.log("\nEVENT MESSAGE: " + arr);
 let acks = {};
-let nodeKeyNum = {};
 
+// For each address in the view, including the nodes own address, send out put message to rehash endpoint
 arr.forEach(function (adr) {
     console.log("Sending rehash GO AHEAD to " + adr);
     axios.put('http://' + adr + '/kv-store/rehash/', {"view":arr}).then(
         response => {
         console.log("REHASH MSG : " + adr + " - " + response.data.msg);
+            //Tally all acknowledgments that are valid, upon reaching the appropriate number, emit rehash event to
+            // signify  that the rehash is done
          if (response.data.msg === "DONE"){
              acks[adr] = response.data.msg;
-             nodeKeyNum[adr] = response.data.NUMKEYS;
          }
         if (Object.keys(acks).length === arr.length){
             console.log("ACKS: " + acks);
             console.log("Emitting event rehash...");
-            ee.emit('rehash', nodeKeyNum);
+            ee.emit('rehash', arr);
         }
         }).catch(
             error => {
@@ -350,7 +370,7 @@ arr.forEach(function (adr) {
 
 
 
-
+// Endpoint to trigger a rehash of all keys stored on a node
 app.put('/kv-store/rehash/', (req, res) => {
     let view = req.body.view;
     console.log("\nREHASH WITH ARR " + view);
@@ -365,6 +385,7 @@ app.put('/kv-store/rehash/', (req, res) => {
        if (target === ADDR){
            return;
        }
+       // Send out a put request to newly hashed address, delete key from own store upon ack
        axios.put('http://' + target + '/kv-store/keys/' + key, {"value":keyv[key]}).then(
            response => {
                console.log(response.data);

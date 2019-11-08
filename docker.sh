@@ -3,8 +3,8 @@
 
 path_to_dockerfile="."
 
-docker network create --subnet=10.10.0.0/16 kv_subnet
-docker build -t kv-store:3.0 $path_to_dockerfile
+#docker network create --subnet=10.10.0.0/16 kv_subnet
+#docker build -t kv-store:3.0 $path_to_dockerfile
 
 # example node addresses
 addr1="10.10.0.2:13800"
@@ -16,13 +16,13 @@ initial_full_view="${addr1},${addr2}"
 full_view=${initial_full_view},${addr3}
 
 docker run --name="node1"        --net=kv_subnet     \
-           --ip=10.10.0.2        -p 13802:13800      \
+           --ip=10.10.0.2        -p 13802:13800 -d      \
            -e ADDRESS="${addr1}"                     \
            -e VIEW=${initial_full_view}              \
            kv-store:3.0
 
 docker run --name="node2"        --net=kv_subnet     \
-           --ip=10.10.0.3        -p 13803:13800      \
+           --ip=10.10.0.3        -p 13803:13800 -d     \
            -e ADDRESS="${addr2}"                     \
            -e VIEW=${initial_full_view}              \
            kv-store:3.0
@@ -68,7 +68,7 @@ expected_response
 # Now we start a new node and add it to the existing store
 
 docker run --name="node3" --net=kv_subnet            \
-           --ip=10.10.0.4  -p 13804:13800            \
+           --ip=10.10.0.4  -p 13804:13800  -d          \
            -e ADDRESS="${addr3}"                     \
            -e VIEW="${full_view}"                    \
            kv-store:3.0
