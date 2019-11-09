@@ -199,7 +199,7 @@ app.delete('/kv-store/keys/:key', (req, res) => {
     //IF hash function target does not belong to current node, send to appropriate node in view
     if (target !== ADDR) {
         console.log("requesting from other node");
-        axios.delete('http://' + target + '/kv-store/' + key).then(
+        axios.delete('http://' + target + '/kv-store/keys/' + key).then(
             response => {
             // console.log(response);
             res.status(response.status);
@@ -311,14 +311,11 @@ app.put('/kv-store/view-change/', (req, res) => {
         ee.once('rehash', function (viewResult) {
             console.log("rehash done...");
             try {
-
-                res.send({"msg":"DONE REHASH"});
-
+                res.send({"message":"View change successful","shards":viewResult});
 
             } catch (e) {
                 console.log("EXCEPTION : " + e.stack);
             }
-
         });
     }
 });
@@ -337,12 +334,12 @@ arr.forEach(function (adr) {
             //Tally all acknowledgments that are valid, upon reaching the appropriate number, emit rehash event to
             // signify  that the rehash is done
          if (response.data.msg === "DONE"){
-             acks[adr] = response.data.msg;
+             acks[adr] = "OK";
          }
         if (Object.keys(acks).length === arr.length){
-            console.log("ACKS: " + acks);
+            // console.log("ACKS: " + acks);
             console.log("Emitting event rehash...");
-            ee.emit('rehash', arr);
+            ee.emit('key-count', arr);
         }
         }).catch(
             error => {
@@ -362,34 +359,89 @@ arr.forEach(function (adr) {
                 } else {
                     // Something happened in setting up the request that triggered an Error
                     console.log('Error', error.message);
-
                 }
+                ee.emit('error',error);
             });
     });
 });
 
+ee.on('key-count',function (arr) {
+    console.log("Beginning keycount requests...");
+    let nodeNum = [];
+    arr.forEach(function (adr) {
+    console.log("Asking " + adr + " for key count...");
+    axios.get('http://' + adr + '/kv-store/key-count').then(
+        response => {
+            console.log(response.data);
+            if (response.data.message === "Key count retrieved successfully") {
+                nodeNum.push({"address":adr, "key-count":response.data["key-count"]});
+            }
+            if (Object.keys(nodeNum).length === arr.length){
+             ee.emit('rehash',nodeNum);
+            }
+        }).catch(
+            error => {
+                if (error.response) {
+                    // The request was made and the server responded with a status code
+                    // that falls out of the range of 2xx
+                    console.log(error.response.data);
+                    // res.send(error.response.data);
+                } else if (error.request) {
+                    // The request was made but no response was received
+                    // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+                    // http.ClientRequest in node.js
+                    //console.log(error.request);
+                    console.log({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
 
+                } else {
+                    // Something happened in setting up the request that triggered an Error
+                    console.log('Error', error.message);
+                }
+                ee.emit('error',error);
+            });
+
+    });
+});
 
 // Endpoint to trigger a rehash of all keys stored on a node
 app.put('/kv-store/rehash/', (req, res) => {
     let view = req.body.view;
+    let nKeys = Object.keys(keyv).length;
+    let count = 0;
     console.log("\nREHASH WITH ARR " + view);
+
+    if (Object.keys(keyv).length === 0){
+        res.send({"msg":"DONE","NUMKEYS":Object.keys(keyv).length});
+        return;
+    }
+
+
 
     Object.keys(keyv).forEach(function (key) {
        console.log("KEY: " + key + " VAL: " + keyv[key]);
-
-       let hash = key.hashCode();
+       let hash = Math.abs(key.hashCode());
        let idx = hash%view.length;
        let target = view[idx];
 
+       console.log("HASH: " + hash + " IDX: " + idx + " TARGET :" + target);
+
+
        if (target === ADDR){
-           return;
-       }
+            count +=1;
+            return;
+        }
+
        // Send out a put request to newly hashed address, delete key from own store upon ack
        axios.put('http://' + target + '/kv-store/keys/' + key, {"value":keyv[key]}).then(
            response => {
                console.log(response.data);
                delete keyv[key];
+               count +=1;
+               if (count === nKeys){
+                   console.log("NUMKEYS: " + nKeys);
+                   res.send({"msg":"DONE","NUMKEYS":Object.keys(keyv).length});
+                   return;
+               }
        }).catch(
            error => {
                if (error.response) {
@@ -403,15 +455,24 @@ app.put('/kv-store/rehash/', (req, res) => {
                    // http.ClientRequest in node.js
                    //console.log(error.request);
                    res.status(503);
+                   console.log("DOWN " + target);
                    res.send({"error":"Instance is down","message":"Error in VIEW-CHANGE"});
                } else {
                    // Something happened in setting up the request that triggered an Error
                    console.log('Error', error.message);
                    res.send(error.message);
                }
+               return;
        });
+
    });
-    res.send({"msg":"DONE","NUMKEYS":Object.keys(keyv).length});
+
+    if (count === nKeys){
+        console.log("NUMKEYS: " + nKeys);
+        res.send({"msg":"DONE","NUMKEYS":Object.keys(keyv).length});
+        return;
+    }
+
 });
 
 app.get('/kv-store/key-count',(req, res) =>{

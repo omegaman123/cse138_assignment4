@@ -36,11 +36,11 @@ docker run --name="node3"        --net=kv_subnet     \
            kv-store:3.0
 
 
-#docker run --name="node4"        --net=kv_subnet     \
-#           --ip=10.10.0.5        -p 13805:13800      \
-#           -e ADDRESS="${addr4}"                     \
-#           -e VIEW=${addr4}                          \
-#           kv-store:3.0
+docker run --name="node4"        --net=kv_subnet     \
+           --ip=10.10.0.5        -p 13805:13800      \
+           -e ADDRESS="${addr4}"                     \
+           -e VIEW=${addr4}                          \
+           kv-store:3.0
 
 
 
