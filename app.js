@@ -13,7 +13,7 @@ const app = express();
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
 
-app.use(logger('dev'));
+app.use(logger('short'));
 app.use(express.json());
 app.use(express.urlencoded({extended: false}));
 app.use(cookieParser());
@@ -50,12 +50,12 @@ app.put('/kv-store/keys/:key', (req, res) => {
     console.log("HASH: " + hsh);
 
     let idx = hsh%viewArr.length;
-    console.log(idx);
+    console.log("ARR IDX: " + idx);
     console.log("TARGET: " + viewArr[idx]);
     let target = viewArr[idx];
 
     if (target !== ADDR) {
-        console.log("requesting from other node");
+        console.log("Forwarding PUT to proper node: " + target);
         if (req.body.value === undefined) {
             console.log("val undef.");
             res.status(400);
@@ -121,7 +121,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
     res.send(msg);
     });
 
-//GET Request end point
+//GET Request end point for specific key
 app.get('/kv-store/keys/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
     console.log("KEY: " + req.params.key);
@@ -136,8 +136,9 @@ app.get('/kv-store/keys/:key', (req, res) => {
     console.log("TARGET: " + viewArr[idx]);
     let target = viewArr[idx];
 
+    //
     if (target !== ADDR) {
-        console.log("requesting from proper node");
+        console.log("Forwarding GET to proper node: " + target);
         axios.get('http://' + target + '/kv-store/keys/' + key).then(
             response => {
             // console.log(response);
@@ -198,7 +199,7 @@ app.delete('/kv-store/keys/:key', (req, res) => {
 
     //IF hash function target does not belong to current node, send to appropriate node in view
     if (target !== ADDR) {
-        console.log("requesting from other node");
+        console.log("Forwarding DELETE to proper node : " + target);
         axios.delete('http://' + target + '/kv-store/keys/' + key).then(
             response => {
             // console.log(response);
@@ -237,8 +238,6 @@ app.delete('/kv-store/keys/:key', (req, res) => {
     res.status(200);
     delete keyv[req.params.key];
     res.send({"doesExist": true, "message": "Deleted successfully"})
-
-
     });
 
 //Endpoint handling view changes, expects JSON object with 'view' field.
@@ -415,8 +414,6 @@ app.put('/kv-store/rehash/', (req, res) => {
         return;
     }
 
-
-
     Object.keys(keyv).forEach(function (key) {
        console.log("KEY: " + key + " VAL: " + keyv[key]);
        let hash = Math.abs(key.hashCode());
@@ -475,12 +472,13 @@ app.put('/kv-store/rehash/', (req, res) => {
 
 });
 
+//Return number of keys stored in node recieving requests own key value store.
 app.get('/kv-store/key-count',(req, res) =>{
     res.send({"message":"Key count retrieved successfully","key-count": Object.keys(keyv).length});
 });
 
 
-// catch 404 and forward to error handler
+// catch all 404 and forward to error handler
 app.use(function (req, res, next) {
     next(createError(404));
 });
