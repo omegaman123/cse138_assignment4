@@ -55,7 +55,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
     console.log("TARGET: " + viewArr[idx]);
     let target = viewArr[idx];
 
-    if (target !== ADDR) {
+    if (target !== ADDR && !replicas.contains(target)) {
         console.log("Forwarding PUT to proper node: " + target);
         if (req.body.value === undefined) {
             console.log("val undef.");
@@ -111,14 +111,29 @@ app.put('/kv-store/keys/:key', (req, res) => {
     }
 
     if (keyv[req.params.key] !== undefined) {
-        keyv[req.params.key] = req.body.value;
-        res.status(200);
-        res.send({"message": "Updated successfully", "replaced": true});
-        return;
+        if (req.body["causal-context"]) {
+            if (req.body["causal-context"].clock < keyv[req.params.key].clock){
+                res.status(400);
+                res.send({"message": "Adding failed", "replaced": false,"causal-context":{"clock":keyv[req.params.key].clock}});
+            } else {
+
+                let clock = req.body["causal-context"].clock + 1;
+                keyv[req.params.key] = {"value": req.body.value, "clock": clock};
+                res.status(200);
+                res.send({"message": "Updated successfully", "replaced": true,"causal-context":clock});
+                return;
+                //TODO: add differentiation between update or not
+            }
+        } else {
+        //Undefined
+        }
     }
     keyv[req.params.key] = req.body.value;
     res.status(201);
     let msg = {"message": "Added successfully", "replaced": false};
+
+
+
     res.send(msg);
 });
 
@@ -255,32 +270,28 @@ app.put('/kv-store/view-change/', (req, res) => {
         return;
     }
 
-    if (!nView.contains(ADDR)){
-        res.status(400);
-        res.send({"ERROR":"VIEW DOES NOT CONTAIN ADR", "ADR": ADDR});
-        return;
-    }
 
     //Split view into array and replace own view with new one
     console.log("\nNEW VIEW: " + nView);
-    viewArr = nView;
+    if (nView.contains(ADDR)) {
+        viewArr = nView;
+        for (let i = 0; i < nView.length; i += rFactor) {
 
-
-    for (let i = 0; i < nView.length; i += rFactor) {
-
-        let subArr = nView.slice(i, rFactor + i);
-        let idx = subArr.indexOf(ADDR);
-        if (idx !== -1) {
-            subArr.splice(idx, 1);
-            replicas = subArr;
-            break;
+            let subArr = nView.slice(i, rFactor + i);
+            let idx = subArr.indexOf(ADDR);
+            if (idx !== -1) {
+                subArr.splice(idx, 1);
+                replicas = subArr;
+                break;
+            }
         }
-    }
-    console.log("REPLICAS : " + replicas);
+        console.log("REPLICAS : " + replicas);
 
-    res.status(200);
-    res.send({"msg": "view change good"});
-    return;
+        res.status(200);
+        res.send({"msg": "view change good"});
+        return;
+    }
+
     //Check if view change message is to be proliferated to other nodes
     //Will be false if receiving view change message from other node
     if (req.body.proliferate === false) {
