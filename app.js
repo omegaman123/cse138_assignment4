@@ -55,7 +55,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
     console.log("TARGET: " + viewArr[idx]);
     let target = viewArr[idx];
 
-    if (target !== ADDR && !replicas.contains(target)) {
+    if (target !== ADDR && !replicas.includes(target)) {
         console.log("Forwarding PUT to proper node: " + target);
         if (req.body.value === undefined) {
             console.log("val undef.");
@@ -75,9 +75,15 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 // console.log(response);
                 res.status(response.status);
                 if (response.data.replaced === true) {
-                    res.send({"message": "Added successfully", "replaced": true, "address": target})
+                    res.send({"message": "Added successfully",
+                              "replaced": true,
+                              "address": target,
+                              "causal-context":response.data["causal-context"]})
                 } else {
-                    res.send({"message": "Added successfully", "replaced": false, "address": target})
+                    res.send({"message": "Added successfully",
+                              "replaced": false,
+                              "address": target,
+                              "causal-context":response.data["causal-context"]})
                 }
 
             }).catch(error => {
@@ -111,30 +117,59 @@ app.put('/kv-store/keys/:key', (req, res) => {
     }
 
     if (keyv[req.params.key] !== undefined) {
-        if (req.body["causal-context"]) {
-            if (req.body["causal-context"].clock < keyv[req.params.key].clock){
+        if (req.body["causal-context"] !== undefined) {
+            if (req.body["causal-context"].clock < keyv[req.params.key].clock) {
                 res.status(400);
-                res.send({"message": "Adding failed", "replaced": false,"causal-context":{"clock":keyv[req.params.key].clock}});
+                res.send({
+                    "message": "Adding failed", "replaced": false,
+                    "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
+                });
+                console.log("Adding key " + req.params.key + " failed with cc " +
+                    req.body["causal-context"].clock +
+                    " which is less than current cc " + keyv[req.params.key].clock);
+
             } else {
 
                 let clock = req.body["causal-context"].clock + 1;
                 keyv[req.params.key] = {"value": req.body.value, "clock": clock};
                 res.status(200);
-                res.send({"message": "Updated successfully", "replaced": true,"causal-context":clock});
-                return;
-                //TODO: add differentiation between update or not
+                res.send({
+                    "message": "Updated successfully", "replaced": true,
+                    "causal-context": {"clock": clock, "key": req.params.key}
+                });
+                console.log("Success adding key " + req.params.key + " with cc " + req.body["causal-context"]);
             }
+            return;
         } else {
-        //Undefined
+            res.status(400);
+            res.send({
+                "message": "Adding failed", "replaced": false,
+                "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
+            });
+            console.log("Adding key " + req.params.key + " failed with undefined cc " +
+                req.body["causal-context"].clock +
+                " which is less than current cc " + keyv[req.params.key].clock);
+        }
+    } else {
+        if (req.body["causal-context"] !== undefined) {
+            let clock = req.body["causal-context"].clock + 1;
+            keyv[req.params.key] = {"value": req.body.value, "clock": clock};
+            res.status(200);
+            res.send({
+                "message": "Updated successfully", "replaced": true,
+                "causal-context": {"clock": clock, "key": req.params.key}
+            });
+            console.log("Success updating key " + req.params.key + " with cc " + req.body["causal-context"]);
+        } else {
+            keyv[req.params.key] = {"value": req.body.value, "clock": 1};
+            res.status(201);
+            res.send({
+                "message": "Added successfully", "replaced": false,
+                "causal-context": {"clock": 1, "key": req.params.key}
+            });
+            console.log("Success adding NEW key " + req.params.key + " with cc " + req.body["causal-context"]);
         }
     }
-    keyv[req.params.key] = req.body.value;
-    res.status(201);
-    let msg = {"message": "Added successfully", "replaced": false};
-
-
-
-    res.send(msg);
 });
 
 //GET Request end point for specific key
@@ -163,7 +198,8 @@ app.get('/kv-store/keys/:key', (req, res) => {
                         "doesExist": true,
                         "message": "Retrieved successfully",
                         "value": response.data.value,
-                        "address": target
+                        "address": target,
+                        "causal-context": response.data["causal-context"]
                     });
                 }
             }).catch(error => {
@@ -193,12 +229,14 @@ app.get('/kv-store/keys/:key', (req, res) => {
 
     if (keyv[req.params.key] === undefined) {
         res.status(404);
-        res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in GET"});
+        res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in GET","causal-context":{}});
         return;
     }
     res.status(200);
     val = keyv[req.params.key];
-    res.send({"doesExist": true, "message": "Retrieved successfully", "value": val})
+    console.log("KEY : " + key + " VAL : " + val);
+    res.send({"doesExist": true, "message": "Retrieved successfully", "value": keyv[key].value,
+                "causal-context":{"clock":keyv.clock,"key":key}})
 });
 
 app.delete('/kv-store/keys/:key', (req, res) => {
