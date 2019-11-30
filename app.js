@@ -171,8 +171,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                     " which is less than current cc " + keyv[req.params.key].clock);
 
             } else {
-
-                clock = req.body["causal-context"].clock + 1;
+                let clock = req.body["causal-context"].clock + 1;
                 keyv[req.params.key] = {"value": req.body.value, "clock": clock};
                 res.status(200);
                 res.send({
@@ -180,6 +179,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                     "causal-context": {"clock": clock, "key": req.params.key}
                 });
                 console.log("Success adding key " + req.params.key + " with cc " + req.body["causal-context"]);
+                ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
             }
             return;
         } else {
@@ -205,7 +205,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 "causal-context": {"clock": clock, "key": req.params.key}
             });
             console.log("Success updating key " + req.params.key + " with cc " + req.body["causal-context"]);
-
+            ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
         } else {
             keyv[req.params.key] = {"value": req.body.value, "clock": 1};
             res.status(201);
@@ -214,10 +214,15 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 "causal-context": {"clock": 1, "key": req.params.key}
             });
             console.log("Success adding NEW key " + req.params.key + " with cc " + req.body["causal-context"]);
+            ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
         }
     }
 });
 
+ee.on('gossip', function (obj) {
+    console.log("gossiping..");
+    console.log(obj);
+});
 
 app.put('/kv-store/gossip', (req, res) => {
     console.log("DATA: " + req.body);
@@ -256,7 +261,7 @@ app.get('/kv-store/keys/:key', (req, res) => {
     let target = viewArr[idx];
 
     //
-    if (target !== ADDR) {
+    if (target !== ADDR && !replicas.includes(target)) {
         console.log("Forwarding GET to proper node: " + target);
         axios.get('http://' + target + '/kv-store/keys/' + key).then(
             response => {
@@ -305,8 +310,8 @@ app.get('/kv-store/keys/:key', (req, res) => {
     console.log("KEY : " + key + " VAL : " + val);
     res.send({
         "doesExist": true, "message": "Retrieved successfully", "value": keyv[key].value,
-        "causal-context": {"clock": keyv.clock, "key": key}
-    })
+        "causal-context": {"clock": keyv[key].clock, "key": key}
+    });
 });
 
 app.delete('/kv-store/keys/:key', (req, res) => {
