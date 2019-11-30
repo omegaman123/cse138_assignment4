@@ -26,7 +26,7 @@ let replicas = [];
 const ADDR = process.env.ADDRESS;
 let INITIAL_VIEW = process.env.VIEW;
 let ee = new EventEmitter();
-let rFactor = 0;
+let rFactor = process.env.REPL_FACTOR;
 
 viewArr = funcs.strSpl(INITIAL_VIEW);
 console.log(typeof viewArr);
@@ -34,9 +34,39 @@ console.log("ADDR: " + ADDR);
 console.log("VIEW: " + viewArr);
 console.log("LENGTH: " + viewArr.length);
 
+for (let i = 0; i < viewArr.length; i += rFactor) {
+    let subArr = viewArr.slice(i, rFactor + i);
+    let idx = subArr.indexOf(ADDR);
+    if (idx !== -1) {
+        subArr.splice(idx, 1);
+        replicas = subArr;
+        break;
+    }
+}
+console.log("REPLICAS: " + replicas);
+
+replicas.forEach((adr) => {
+    axios.get('http://' + adr + '/kv-store/', {timeout: 2000}).then(
+        response => {
+            keyv = response.body.keyv;
+        }).catch(
+        error => {
+            console.log("Error asking database from replica on startup from address : " + adr);
+            if (error.response) {
+                console.log(error.response);
+            } else if (error.request) {
+                // console.log(error.request);
+                console.log("Timeout asking replica " + adr + " on startup")
+
+            } else {
+                console.log('Error', error.message);
+            }
+        });
+});
+
 
 app.get('/kv-store/', (req, res) => {
-    res.send(keyv);
+    res.send({"keyv": keyv});
 });
 
 
@@ -75,15 +105,19 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 // console.log(response);
                 res.status(response.status);
                 if (response.data.replaced === true) {
-                    res.send({"message": "Added successfully",
-                              "replaced": true,
-                              "address": target,
-                              "causal-context":response.data["causal-context"]})
+                    res.send({
+                        "message": "Added successfully",
+                        "replaced": true,
+                        "address": target,
+                        "causal-context": response.data["causal-context"]
+                    })
                 } else {
-                    res.send({"message": "Added successfully",
-                              "replaced": false,
-                              "address": target,
-                              "causal-context":response.data["causal-context"]})
+                    res.send({
+                        "message": "Added successfully",
+                        "replaced": false,
+                        "address": target,
+                        "causal-context": response.data["causal-context"]
+                    })
                 }
 
             }).catch(error => {
@@ -118,6 +152,14 @@ app.put('/kv-store/keys/:key', (req, res) => {
 
     if (keyv[req.params.key] !== undefined) {
         if (req.body["causal-context"] !== undefined) {
+            if (req.body["causal-context"].clock === undefined) {
+                res.status(400);
+                res.send({
+                    "message": "Adding failed", "replaced": false,
+                    "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
+                });
+                return;
+            }
             if (req.body["causal-context"].clock < keyv[req.params.key].clock) {
                 res.status(400);
                 res.send({
@@ -130,7 +172,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
 
             } else {
 
-                let clock = req.body["causal-context"].clock + 1;
+                clock = req.body["causal-context"].clock + 1;
                 keyv[req.params.key] = {"value": req.body.value, "clock": clock};
                 res.status(200);
                 res.send({
@@ -152,7 +194,10 @@ app.put('/kv-store/keys/:key', (req, res) => {
         }
     } else {
         if (req.body["causal-context"] !== undefined) {
-            let clock = req.body["causal-context"].clock + 1;
+            let clock = 1;
+            if (req.body["causal-context"].clock !== undefined) {
+                clock = req.body["causal-context"].clock + 1;
+            }
             keyv[req.params.key] = {"value": req.body.value, "clock": clock};
             res.status(200);
             res.send({
@@ -160,6 +205,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 "causal-context": {"clock": clock, "key": req.params.key}
             });
             console.log("Success updating key " + req.params.key + " with cc " + req.body["causal-context"]);
+
         } else {
             keyv[req.params.key] = {"value": req.body.value, "clock": 1};
             res.status(201);
@@ -168,6 +214,28 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 "causal-context": {"clock": 1, "key": req.params.key}
             });
             console.log("Success adding NEW key " + req.params.key + " with cc " + req.body["causal-context"]);
+        }
+    }
+});
+
+
+app.put('/kv-store/gossip', (req, res) => {
+    console.log("DATA: " + req.body);
+    if (keyv[req.body.key] === undefined) {
+        console.log("KEY " + req.body.key + "  accepting " + req.body.value + ":" + req.body.clock);
+        keyv[req.body.key] = {"value": req.body.value, "clock": req.body.clock};
+        res.send({"msg": "OK"});
+    } else {
+        if (keyv[req.body.key].clock < req.body.clock) {
+            console.log("KEY " + req.body.key + " has clock " + keyv[req.body.key].clock +
+                " less than req clock " + req.body.clock);
+            keyv[req.body.key].value = req.body.value;
+            keyv[req.body.key].clock = req.body.clock;
+            res.send({"msg": "OK"});
+        } else {
+            console.log("KEY " + req.body.key + " has clock " + keyv[req.body.key].clock +
+                " greater than req clock " + req.body.clock);
+            res.send({"msg": "NO", "clock": keyv[req.body.key].clock})
         }
     }
 });
@@ -229,14 +297,16 @@ app.get('/kv-store/keys/:key', (req, res) => {
 
     if (keyv[req.params.key] === undefined) {
         res.status(404);
-        res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in GET","causal-context":{}});
+        res.send({"doesExist": false, "error": "Key does not exist", "message": "Error in GET", "causal-context": {}});
         return;
     }
     res.status(200);
     val = keyv[req.params.key];
     console.log("KEY : " + key + " VAL : " + val);
-    res.send({"doesExist": true, "message": "Retrieved successfully", "value": keyv[key].value,
-                "causal-context":{"clock":keyv.clock,"key":key}})
+    res.send({
+        "doesExist": true, "message": "Retrieved successfully", "value": keyv[key].value,
+        "causal-context": {"clock": keyv.clock, "key": key}
+    })
 });
 
 app.delete('/kv-store/keys/:key', (req, res) => {
@@ -299,7 +369,7 @@ app.delete('/kv-store/keys/:key', (req, res) => {
 //Endpoint handling view changes, expects JSON object with 'view' field.
 app.put('/kv-store/view-change/', (req, res) => {
     let nView = req.body.view;
-    let rFactor = req.body["repl-factor"];
+    rFactor = req.body["repl-factor"];
     if (nView.length % rFactor !== 0) {
         console.log("ERROR WITH rFactor - view array length does not match replication factor: "
             + nView.length + " - " + rFactor);
@@ -478,6 +548,44 @@ ee.on('key-count', function (arr) {
             });
 
     });
+});
+
+
+app.get('/kv-store/shards/', (req, res) => {
+    let shards = [];
+    let s = 1;
+    for (let i = 0; i < viewArr.length; i += rFactor) {
+        let subArr = viewArr.slice(i, rFactor + i);
+        if (subArr[0] === ADDR) {
+            shards.push({"shard-id": s, "key-count": Object.keys(keyv).length, "replicas": subArr});
+        } else {
+            axios.get('http://' + subArr[0] + '/kv-store/key-count').then(
+                response => {
+                    shards.push({"shard-id": s, "key-count": response.data["key-count"], "replicas": subArr});
+                }
+            )
+        }
+    }
+    res.send({"shards": shards});
+});
+
+app.get('/kv-store/shards/:id', (req, res) => {
+    let shards = [];
+    let s = 1;
+    for (let i = 0; i < viewArr.length; i += rFactor) {
+        let subArr = viewArr.slice(i, rFactor + i);
+        axios.get('http://' + subArr[0] + '/kv-store/key-count').then(
+            response => {
+                shards.push({"shard-id": s, "key-count": response.data["key-count"], "replicas": subArr});
+            }
+        )
+    }
+
+    if (shards[req.params.id - 1] === undefined) {
+        res.send({"message": "Shard not found"});
+    } else {
+        res.send(shards[req.params.id - 1]);
+    }
 });
 
 // Endpoint to trigger a rehash of all keys stored on a node
