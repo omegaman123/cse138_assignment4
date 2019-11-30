@@ -27,6 +27,7 @@ const ADDR = process.env.ADDRESS;
 let INITIAL_VIEW = process.env.VIEW;
 let ee = new EventEmitter();
 let rFactor = process.env.REPL_FACTOR;
+let sync = true;
 
 viewArr = funcs.strSpl(INITIAL_VIEW);
 console.log(typeof viewArr);
@@ -57,6 +58,7 @@ replicas.forEach((adr) => {
             } else if (error.request) {
                 // console.log(error.request);
                 console.log("Timeout asking replica " + adr + " on startup")
+                sync = false;
 
             } else {
                 console.log('Error', error.message);
@@ -222,12 +224,31 @@ app.put('/kv-store/keys/:key', (req, res) => {
 ee.on('gossip', function (obj) {
     console.log("gossiping..");
     console.log(obj);
+
+    replicas.forEach(adr =>{
+    axios.put('http://'+adr+'/kv-store/gossip', obj, {timeout: 5000}).then(
+        response => {
+                console.log("Gossip message from " + adr + " " + response.body.msg);
+        }).catch(
+            error => {
+                console.log("ERROR gossiping to adr " + adr);
+                sync = false;
+                if (error.response) {
+                    console.log(error.response);
+                } else if (error.request) {
+                    // console.log(error.request);
+                    console.log("Timeout gossiping to adr " + adr);
+                } else {
+                    console.log('Error', error.message);
+                }
+            });
+    });
 });
 
 app.put('/kv-store/gossip', (req, res) => {
     console.log("DATA: " + req.body);
     if (keyv[req.body.key] === undefined) {
-        console.log("KEY " + req.body.key + "  accepting " + req.body.value + ":" + req.body.clock);
+        console.log("KEY " + req.body.key + "  accepting " + req.body.value + ": clock " + req.body.clock);
         keyv[req.body.key] = {"value": req.body.value, "clock": req.body.clock};
         res.send({"msg": "OK"});
     } else {
@@ -260,7 +281,6 @@ app.get('/kv-store/keys/:key', (req, res) => {
     console.log("TARGET: " + viewArr[idx]);
     let target = viewArr[idx];
 
-    //
     if (target !== ADDR && !replicas.includes(target)) {
         console.log("Forwarding GET to proper node: " + target);
         axios.get('http://' + target + '/kv-store/keys/' + key).then(
