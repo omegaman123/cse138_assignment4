@@ -77,8 +77,15 @@ app.put('/kv-store/keys/:key', (req, res) => {
     console.log("KEY: " + req.params.key);
     console.log("VALUE: " + req.body.value);
 
+
     let key = req.params.key;
     let val = req.body.value;
+    if (req.body["causal-context"] === undefined){
+        console.log("undefined causaul context in put for k " + key + " v " + val);
+        res.send({"msg":"No causal context object in request"});
+        return;
+
+    }
     let hsh = Math.abs(key.hashCode());
     console.log("HASH: " + hsh);
 
@@ -101,7 +108,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
         }
 
         axios.put('http://' + target + '/kv-store/keys/' + key, {
-            "value": val
+            "value": val,"causal-context":req.body["causal-context"]
         }).then(
             response => {
                 // console.log(response);
@@ -228,7 +235,7 @@ ee.on('gossip', function (obj) {
     replicas.forEach(adr =>{
     axios.put('http://'+adr+'/kv-store/gossip', obj, {timeout: 5000}).then(
         response => {
-                console.log("Gossip message from " + adr + " " + response.body.msg);
+                console.log("Gossip message from " + adr + " " + response.data.msg);
         }).catch(
             error => {
                 console.log("ERROR gossiping to adr " + adr);
