@@ -406,7 +406,7 @@ app.put('/kv-store/view-change/', (req, res) => {
 
     //Split view into array and replace own view with new one
     console.log("\nNEW VIEW: " + nView);
-    if (nView.contains(ADDR)) {
+    if (nView.includes(ADDR)) {
         viewArr = nView;
         for (let i = 0; i < nView.length; i += rFactor) {
 
@@ -420,9 +420,6 @@ app.put('/kv-store/view-change/', (req, res) => {
         }
         console.log("REPLICAS : " + replicas);
 
-        res.status(200);
-        res.send({"msg": "view change good"});
-        return;
     }
 
     //Check if view change message is to be proliferated to other nodes
@@ -437,7 +434,7 @@ app.put('/kv-store/view-change/', (req, res) => {
 
     //If receiving view change from client, begin process for sending out view change to all nodes in view.
     if (req.body.proliferate === undefined && req.body.proliferate !== false) {
-        nArr.forEach(function (adr) {
+        viewArr.forEach(function (adr) {
             console.log("ADR: " + adr);
             //Skip sending view to self
             if (adr === ADDR) {
@@ -447,15 +444,15 @@ app.put('/kv-store/view-change/', (req, res) => {
             //Send view change to viewchange endpoint for other nodes, attaching proliferate:false to prevent
             // other nodes from sending out view change upon receiving it
             axios.put('http://' + adr + '/kv-store/view-change/',
-                {"view": nView, "proliferate": false}).then(
+                {"view": nView, "proliferate": false,"repl-factor":rFactor}).then(
                 response => {
                     //increment count for nodes
                     console.log("VC MSG: " + response.data.ADR + " " + response.data.VC);
                     acks[response.data.ADR] = response.data.VC;
                     // Count the number of acknowledgements received, upon receiving all except own, emit event to
                     // trigger rehash across all nodes.
-                    if (Object.keys(acks).length === nArr.length - 1) {
-                        ee.emit('message', nArr);
+                    if (Object.keys(acks).length === viewArr.length - 1) {
+                        ee.emit('message', viewArr);
                     }
                     //catch any errors from messages and return appropriate response
                 }).catch(error => {
@@ -475,7 +472,9 @@ app.put('/kv-store/view-change/', (req, res) => {
                     // Something happened in setting up the request that triggered an Error
                     console.log('Error', error.message);
                     res.send(error.message);
+
                 }
+                return;
             });
         });
 
