@@ -69,35 +69,47 @@ app.get('/kv-store/', (req, res) => {
     res.send({"keyv": keyv});
 });
 
-app.put('/kv-store/sync',(req,res) => {
+app.put('/kv-store/sync/',(req,res) => {
+    console.log("syncing...");
     console.log(req.body.keyv);
     let kv = req.body.keyv;
-    for (let key in kv) {
-        if (kv.hasOwnProperty(key)) {
-            let val = kv[key];
-            console.log(key + " -> " + val.value + ":"+ val.clock);
-            if ( val.clock > keyv[val.key].clock){
-                console.log("Changing key from keep alive");
-                keyv[val.key] = val;
-            }
+    Object.keys(kv).forEach(function (key) {
+        let val = kv[key];
+        console.log(key + " -> " + val.value + ":" + val.clock);
+        if ( val.clock > keyv[key].clock) {
+            console.log("Changing key from keep alive");
+            keyv[val.key] = val;
         }
-    }
+    });
     sync = true;
     res.send({"msg":"sync done"});
 });
 
 setInterval(function () {
+    console.log("Sending keepalive...");
     for (let i = 0; i < replicas.length; i++) {
-        let trgt = replicas[i];
-        axios.put('http://' + trgt + '/kv-store/sync',{'keyv':keyv}).then(
+        let trgt = replicas[i].trim();
+         console.log("Target for KA: "+ trgt);
+        axios.put('http://' + trgt + '/kv-store/sync/',{'keyv':keyv}).then(
             response => {
+                console.log("msg " + response.data.msg);
+                if (response.data.msg === "sync done") {
+                    sync = true;
+                }
             }).catch(
             error => {
-
+                if (error.response) {
+                    console.log(error.response);
+                } else if (error.request) {
+                    // console.log(error.request);
+                    console.log("Timeout for keepalive to  " + trgt );
+                    sync = false;
+                } else {
+                    console.log('Error', error.message);
+                }
             });
     }
-
-}, 5000);
+}, 10000);
 console.log("REPLICAS: " + replicas);
 
 
@@ -105,7 +117,6 @@ app.put('/kv-store/keys/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
     console.log("KEY: " + req.params.key);
     console.log("VALUE: " + req.body.value);
-
 
     let key = req.params.key;
     let val = req.body.value;
@@ -136,44 +147,56 @@ app.put('/kv-store/keys/:key', (req, res) => {
             return;
         }
 
-        axios.put('http://' + target + '/kv-store/keys/' + key, {
-            "value": val, "causal-context": req.body["causal-context"]
-        }).then(
-            response => {
-                // console.log(response);
-                res.status(response.status);
-                if (response.data.replaced === true) {
-                    res.send({
-                        "message": "Added successfully",
-                        "replaced": true,
-                        "address": target,
-                        "causal-context": response.data["causal-context"]
-                    })
-                } else {
-                    res.send({
-                        "message": "Added successfully",
-                        "replaced": false,
-                        "address": target,
-                        "causal-context": response.data["causal-context"]
-                    })
-                }
-
-            }).catch(error => {
-            if (error.response) {
-                res.status(error.response.status);
-                res.send(error.response.data);
-            } else if (error.request) {
-                //console.log(error.request);
-                res.status(503);
-                res.send({"error": "Main instance is down", "message": "Error in PUT"});
-            } else {
-                console.log('Error', error.message);
-                res.send(error.message);
+        let tarArr = [];
+        for (let i = 0; i < viewArr.length; i += rFactor) {
+            let subArr = viewArr.slice(i, rFactor + i);
+            let idx = subArr.indexOf(target);
+            if (idx !== -1) {
+                subArr.splice(idx, 1);
+                tarArr = subArr;
+                break;
             }
-            console.log(error.config);
+        }
+        for (let i = 0; i < tarArr.length; i++) {
+            axios.put('http://' + tarArr[i] + '/kv-store/keys/' + key, {
+                "value": val, "causal-context": req.body["causal-context"]
+            }).then(
+                response => {
+                    // console.log(response);
+                    res.status(response.status);
+                    if (response.data.replaced === true) {
+                        res.send({
+                            "message": "Added successfully",
+                            "replaced": true,
+                            "address": target,
+                            "causal-context": response.data["causal-context"]
+                        });
+                        return;
+                    } else {
+                        res.send({
+                            "message": "Added successfully",
+                            "replaced": false,
+                            "address": target,
+                            "causal-context": response.data["causal-context"]
+                        });
+                        return;
+                    }
+                }).catch(error => {
+                if (error.response) {
+                    res.status(error.response.status);
+                    res.send(error.response.data);
+                } else if (error.request) {
+                    //console.log(error.request);
+                    res.status(503);
+                    res.send({"error": "Main instance is down", "message": "Error in PUT"});
+                } else {
+                    console.log('Error', error.message);
+                    res.send(error.message);
+                }
+                console.log(error.config);
 
-        });
-        return;
+            });
+        }
     }
 
 
