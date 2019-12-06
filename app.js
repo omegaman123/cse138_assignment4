@@ -44,7 +44,6 @@ for (let i = 0; i < viewArr.length; i += rFactor) {
         break;
     }
 }
-console.log("REPLICAS: " + replicas);
 
 replicas.forEach((adr) => {
     axios.get('http://' + adr + '/kv-store/', {timeout: 2000}).then(
@@ -57,9 +56,8 @@ replicas.forEach((adr) => {
                 console.log(error.response);
             } else if (error.request) {
                 // console.log(error.request);
-                console.log("Timeout asking replica " + adr + " on startup")
+                console.log("Timeout asking replica " + adr + " on startup");
                 sync = false;
-
             } else {
                 console.log('Error', error.message);
             }
@@ -71,6 +69,37 @@ app.get('/kv-store/', (req, res) => {
     res.send({"keyv": keyv});
 });
 
+app.put('/kv-store/sync',(req,res) => {
+    console.log(req.body.keyv);
+    let kv = req.body.keyv;
+    for (let key in kv) {
+        if (kv.hasOwnProperty(key)) {
+            let val = kv[key];
+            console.log(key + " -> " + val.value + ":"+ val.clock);
+            if ( val.clock > keyv[val.key].clock){
+                console.log("Changing key from keep alive");
+                keyv[val.key] = val;
+            }
+        }
+    }
+    sync = true;
+    res.send({"msg":"sync done"});
+});
+
+setInterval(function () {
+    for (let i = 0; i < replicas.length; i++) {
+        let trgt = replicas[i];
+        axios.put('http://' + trgt + '/kv-store/sync',{'keyv':keyv}).then(
+            response => {
+            }).catch(
+            error => {
+
+            });
+    }
+
+}, 5000);
+console.log("REPLICAS: " + replicas);
+
 
 app.put('/kv-store/keys/:key', (req, res) => {
     console.log('\n' + req.method + ": ");
@@ -80,9 +109,9 @@ app.put('/kv-store/keys/:key', (req, res) => {
 
     let key = req.params.key;
     let val = req.body.value;
-    if (req.body["causal-context"] === undefined){
+    if (req.body["causal-context"] === undefined) {
         console.log("undefined causaul context in put for k " + key + " v " + val);
-        res.send({"msg":"No causal context object in request"});
+        res.send({"msg": "No causal context object in request"});
         return;
 
     }
@@ -108,7 +137,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
         }
 
         axios.put('http://' + target + '/kv-store/keys/' + key, {
-            "value": val,"causal-context":req.body["causal-context"]
+            "value": val, "causal-context": req.body["causal-context"]
         }).then(
             response => {
                 // console.log(response);
@@ -232,11 +261,11 @@ ee.on('gossip', function (obj) {
     console.log("gossiping..");
     console.log(obj);
 
-    replicas.forEach(adr =>{
-    axios.put('http://'+adr+'/kv-store/gossip', obj, {timeout: 5000}).then(
-        response => {
+    replicas.forEach(adr => {
+        axios.put('http://' + adr + '/kv-store/gossip', obj, {timeout: 5000}).then(
+            response => {
                 console.log("Gossip message from " + adr + " " + response.data.msg);
-        }).catch(
+            }).catch(
             error => {
                 console.log("ERROR gossiping to adr " + adr);
                 sync = false;
@@ -451,7 +480,7 @@ app.put('/kv-store/view-change/', (req, res) => {
             //Send view change to viewchange endpoint for other nodes, attaching proliferate:false to prevent
             // other nodes from sending out view change upon receiving it
             axios.put('http://' + adr + '/kv-store/view-change/',
-                {"view": nView, "proliferate": false,"repl-factor":rFactor}).then(
+                {"view": nView, "proliferate": false, "repl-factor": rFactor}).then(
                 response => {
                     //increment count for nodes
                     console.log("VC MSG: " + response.data.ADR + " " + response.data.VC);
