@@ -157,7 +157,11 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 break;
             }
         }
+        let done = false;
         for (let i = 0; i < tarArr.length; i++) {
+            if (done) {
+                return;
+            }
             axios.put('http://' + tarArr[i] + '/kv-store/keys/' + key, {
                 "value": val, "causal-context": req.body["causal-context"]
             }).then(
@@ -171,7 +175,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                             "address": target,
                             "causal-context": response.data["causal-context"]
                         });
-                        return;
+
                     } else {
                         res.send({
                             "message": "Added successfully",
@@ -179,8 +183,8 @@ app.put('/kv-store/keys/:key', (req, res) => {
                             "address": target,
                             "causal-context": response.data["causal-context"]
                         });
-                        return;
                     }
+                    done = true;
                 }).catch(error => {
                 if (error.response) {
                     res.status(error.response.status);
@@ -194,7 +198,6 @@ app.put('/kv-store/keys/:key', (req, res) => {
                     res.send(error.message);
                 }
                 console.log(error.config);
-
             });
         }
     }
@@ -342,39 +345,58 @@ app.get('/kv-store/keys/:key', (req, res) => {
 
     if (target !== ADDR && !replicas.includes(target)) {
         console.log("Forwarding GET to proper node: " + target);
-        axios.get('http://' + target + '/kv-store/keys/' + key).then(
-            response => {
-                // console.log(response);
-                if (response.data.doesExist === true) {
-                    res.send({
-                        "doesExist": true,
-                        "message": "Retrieved successfully",
-                        "value": response.data.value,
-                        "address": target,
-                        "causal-context": response.data["causal-context"]
-                    });
-                }
-            }).catch(error => {
-            if (error.response) {
-                // The request was made and the server responded with a status code
-                // that falls out of the range of 2xx
-                res.status(error.response.status);
-                res.send(error.response.data);
-            } else if (error.request) {
-                // The request was made but no response was received
-                // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
-                // http.ClientRequest in node.js
-                //console.log(error.request);
-                res.status(503);
-                res.send({"error": "Instance is down", "message": "Error in GET"});
-            } else {
-                // Something happened in setting up the request that triggered an Error
-                console.log('Error', error.message);
-                res.send(error.message);
-            }
-            console.log(error.config);
 
-        });
+        let tarArr = [];
+        for (let i = 0; i < viewArr.length; i += rFactor) {
+            let subArr = viewArr.slice(i, rFactor + i);
+            let idx = subArr.indexOf(target);
+            if (idx !== -1) {
+                subArr.splice(idx, 1);
+                tarArr = subArr;
+                break;
+            }
+        }
+        let done = false;
+
+        for(let i = 0; i < tarArr.length; i++) {
+            if (done) {
+                return;
+            }
+            axios.get('http://' + target + '/kv-store/keys/' + key).then(
+                response => {
+                    // console.log(response);
+                    if (response.data.doesExist === true) {
+                        res.send({
+                            "doesExist": true,
+                            "message": "Retrieved successfully",
+                            "value": response.data.value,
+                            "address": target,
+                            "causal-context": response.data["causal-context"]
+                        });
+                        done = true;
+                    }
+                }).catch(error => {
+                if (error.response) {
+                    // The request was made and the server responded with a status code
+                    // that falls out of the range of 2xx
+                    res.status(error.response.status);
+                    res.send(error.response.data);
+                } else if (error.request) {
+                    // The request was made but no response was received
+                    // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+                    // http.ClientRequest in node.js
+                    //console.log(error.request);
+                    res.status(503);
+                    res.send({"error": "Instance is down", "message": "Error in GET"});
+                } else {
+                    // Something happened in setting up the request that triggered an Error
+                    console.log('Error', error.message);
+                    res.send(error.message);
+                }
+                console.log(error.config);
+
+            });
+        }
         return;
     }
 
