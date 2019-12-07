@@ -162,8 +162,8 @@ app.put('/kv-store/keys/:key', (req, res) => {
             }
         }
         let done = false;
-        let acks = 0;
         let msg = {};
+        let errMsg = {};
         console.log("shard " + tarArr + " length " + tarArr.length);
 
         Promise.all(tarArr.map(tar => axios.put('http://' + tar + '/kv-store/keys/' + key).then(
@@ -185,70 +185,39 @@ app.put('/kv-store/keys/:key', (req, res) => {
                         "causal-context": response.data["causal-context"]
                     }
                 }
+                done = true;
+
             }).catch(
             error => {
-            console.log("error with put " + tar);
-                msg = {"msg":"blah"}
+                console.log("error with put " + tar);
+                if (error.response) {
+                    console.log("error in resp " + error.response.status);
+                    res.status(error.response.status);
+                } else if (error.request) {
+                    console.log("couldnt reach tar " + tar);
+                    //console.log(error.request);
+                    res.status(503);
+                    errMsg = {"msg":"shard unreachable","shard":tarArr}
+                } else {
+                    console.log('Error', error.message);
+                }
+                // console.log(error.config);
+
             }))).then(
             data => {
                 console.log("Done with all puts");
-                res.send(msg);
-                return;
+                if (done) {
+                    if (msg.replaced === false) {
+                        res.status(201);
+                    } else {
+                        res.status(200);
+                    }
+                    res.send(msg);
+                } else {
+                    res.send(errMsg);
+                }
             });
-        // for (let i = 0; i < tarArr.length-1; i++) {
-        //     console.log("put " + i + " tar " + tarArr[i]);
-        //     axios.put('http://' + tarArr[i] + '/kv-store/keys/' + key, {
-        //         "value": val, "causal-context": req.body["causal-context"]
-        //     }).then(
-        //         response => {
-        //             console.log("resp heard from " + tarArr[i]);
-        //             // console.log(response);
-        //
-        //             res.status(response.status);
-        //             if (response.data.replaced === true) {
-        //                 msg = {
-        //                     "message": "Added successfully",
-        //                     "replaced": true,
-        //                     "address": target,
-        //                     "causal-context": response.data["causal-context"]
-        //                 }
-        //
-        //             } else {
-        //                 msg = {
-        //                     "message": "Added successfully",
-        //                     "replaced": false,
-        //                     "address": target,
-        //                     "causal-context": response.data["causal-context"]
-        //                 }
-        //             }
-        //             acks +=1;
-        //             done = true;
-        //             if (acks === tarArr.length){
-        //                 res.send(msg);
-        //             }
-        //         }).catch(error => {
-        //             acks +=1;
-        //             console.log("error in put ");
-        //         if (error.response) {
-        //             console.log("error in resp " + error.response.status);
-        //             res.status(error.response.status);
-        //         } else if (error.request) {
-        //             console.log("couldnt reach tar " + tarArr[i]);
-        //             //console.log(error.request);
-        //             res.status(503);
-        //         } else {
-        //             console.log('Error', error.message);
-        //         }
-        //         // console.log(error.config);
-        //         if (acks === tarArr.length){
-        //             if (done){
-        //                 res.send(msg);
-        //             } else {
-        //              console.log("All puts failed for shard " + tarArr);
-        //             }
-        //         }
-        //     });
-        // }
+        
     } else {
         if (req.body.value === undefined) {
             console.log("val undef.");
