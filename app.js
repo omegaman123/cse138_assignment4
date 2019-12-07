@@ -26,14 +26,15 @@ let replicas = [];
 const ADDR = process.env.ADDRESS;
 let INITIAL_VIEW = process.env.VIEW;
 let ee = new EventEmitter();
-let rFactor = process.env.REPL_FACTOR;
+let rFactor = parseInt(process.env.REPL_FACTOR);
 let sync = true;
 
 viewArr = funcs.strSpl(INITIAL_VIEW);
-console.log(typeof viewArr);
+console.log(viewArr);
 console.log("ADDR: " + ADDR);
 console.log("VIEW: " + viewArr);
 console.log("LENGTH: " + viewArr.length);
+console.log("rFactor: " + rFactor);
 
 for (let i = 0; i < viewArr.length; i += rFactor) {
     let subArr = viewArr.slice(i, rFactor + i);
@@ -45,24 +46,24 @@ for (let i = 0; i < viewArr.length; i += rFactor) {
     }
 }
 
-replicas.forEach((adr) => {
-    axios.get('http://' + adr + '/kv-store/', {timeout: 2000}).then(
-        response => {
-            keyv = response.body.keyv;
-        }).catch(
-        error => {
-            console.log("Error asking database from replica on startup from address : " + adr);
-            if (error.response) {
-                console.log(error.response);
-            } else if (error.request) {
-                // console.log(error.request);
-                console.log("Timeout asking replica " + adr + " on startup");
-                sync = false;
-            } else {
-                console.log('Error', error.message);
-            }
-        });
-});
+// replicas.forEach((adr) => {
+//     axios.get('http://' + adr + '/kv-store/', {timeout: 2000}).then(
+//         response => {
+//             keyv = response.body.keyv;
+//         }).catch(
+//         error => {
+//             console.log("Error asking database from replica on startup from address : " + adr);
+//             if (error.response) {
+//                 console.log(error.response.data);
+//             } else if (error.request) {
+//                 // console.log(error.request);
+//                 console.log("Timeout asking replica " + adr + " on startup");
+//                 sync = false;
+//             } else {
+//                 console.log('Error', error.data);
+//             }
+//         });
+// });
 
 
 app.get('/kv-store/', (req, res) => {
@@ -70,15 +71,19 @@ app.get('/kv-store/', (req, res) => {
 });
 
 app.put('/kv-store/sync/',(req,res) => {
-    console.log("syncing...");
+    console.log("\nsyncing...");
     console.log(req.body.keyv);
     let kv = req.body.keyv;
+    if(kv === {}) {
+        res.send({"msg":"sync done"});
+        return;
+    }
     Object.keys(kv).forEach(function (key) {
         let val = kv[key];
         console.log(key + " -> " + val.value + ":" + val.clock);
-        if ( val.clock > keyv[key].clock) {
+        if (keyv[key] === undefined || val.clock > keyv[key].clock) {
             console.log("Changing key from keep alive");
-            keyv[val.key] = val;
+            keyv[key] = val;
         }
     });
     sync = true;
@@ -86,7 +91,8 @@ app.put('/kv-store/sync/',(req,res) => {
 });
 
 setInterval(function () {
-    console.log("Sending keepalive...");
+    console.log("\nSending keepalive...");
+    console.log(keyv);
     for (let i = 0; i < replicas.length; i++) {
         let trgt = replicas[i].trim();
          console.log("Target for KA: "+ trgt);
@@ -99,13 +105,13 @@ setInterval(function () {
             }).catch(
             error => {
                 if (error.response) {
-                    console.log(error.response);
+                    console.log(error.response.data);
                 } else if (error.request) {
                     // console.log(error.request);
                     console.log("Timeout for keepalive to  " + trgt );
                     sync = false;
                 } else {
-                    console.log('Error', error.message);
+                    console.log('Error', error.data);
                 }
             });
     }
@@ -188,18 +194,23 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 }).catch(error => {
                 if (error.response) {
                     res.status(error.response.status);
-                    res.send(error.response.data);
                 } else if (error.request) {
                     //console.log(error.request);
                     res.status(503);
-                    res.send({"error": "Main instance is down", "message": "Error in PUT"});
                 } else {
                     console.log('Error', error.message);
-                    res.send(error.message);
+
                 }
-                console.log(error.config);
+                // console.log(error.config);
             });
         }
+        if (!done){
+            if (res.status === 503) {
+              res.send({"msg":"all replicas in shard down","shard":tarArr})
+            }
+            res.send({"msg":"error"})
+        }
+        return;
     }
 
 
@@ -362,7 +373,7 @@ app.get('/kv-store/keys/:key', (req, res) => {
             if (done) {
                 return;
             }
-            axios.get('http://' + target + '/kv-store/keys/' + key).then(
+            axios.get('http://' + tarArr[i] + '/kv-store/keys/' + key).then(
                 response => {
                     // console.log(response);
                     if (response.data.doesExist === true) {
@@ -483,7 +494,6 @@ app.put('/kv-store/view-change/', (req, res) => {
         res.send({"msg": "ERROR WITH Replication factor and view length"});
         return;
     }
-
 
     //Split view into array and replace own view with new one
     console.log("\nNEW VIEW: " + nView);

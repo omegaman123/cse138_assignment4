@@ -8,17 +8,17 @@ curl --request   PUT                                 \
      --header    "Content-Type: application/json"    \
      --data      '{"value": "sampleValue14","causal-context":{"clock":1,"key":"Key1"}}'          \
      --write-out "%{http_code}\n"                    \
-     http://localhost:13800/kv-store/keys/Key1
+     http://localhost:13802/kv-store/keys/Key1
 
 curl --request   PUT                                 \
      --header    "Content-Type: application/json"    \
      --data      '{"value": "sampleValue13","causal-context":{"clock":1,"key":"Key2"}}'          \
      --write-out "%{http_code}\n"                    \
-     http://localhost:13800/kv-store/keys/Key2
+     http://localhost:13802/kv-store/keys/Key2
 
 curl --request   PUT                                 \
      --header    "Content-Type: application/json"    \
      --data      '{"value": "sampleValue12","causal-context":{"clock":1,"key":"Key3"}}'          \
      --write-out "%{http_code}\n"                    \
-     http://localhost:13800/kv-store/keys/Key3
+     http://localhost:13802/kv-store/keys/Key3
 
