@@ -90,32 +90,32 @@ app.put('/kv-store/sync/', (req, res) => {
     res.send({"msg": "sync done"});
 });
 
-// setInterval(function () {
-//     console.log("\nSending keepalive...");
-//     console.log(keyv);
-//     for (let i = 0; i < replicas.length; i++) {
-//         let trgt = replicas[i].trim();
-//          console.log("Target for KA: "+ trgt);
-//         axios.put('http://' + trgt + '/kv-store/sync/',{'keyv':keyv}).then(
-//             response => {
-//                 console.log("msg " + response.data.msg);
-//                 if (response.data.msg === "sync done") {
-//                     sync = true;
-//                 }
-//             }).catch(
-//             error => {
-//                 if (error.response) {
-//                     console.log(error.response.data);
-//                 } else if (error.request) {
-//                     // console.log(error.request);
-//                     console.log("Timeout for keepalive to  " + trgt );
-//                     sync = false;
-//                 } else {
-//                     console.log('Error', error.data);
-//                 }
-//             });
-//     }
-// }, 1000000000000000000);
+setInterval(function () {
+    console.log("\nSending keepalive...");
+    console.log(keyv);
+    for (let i = 0; i < replicas.length; i++) {
+        let trgt = replicas[i].trim();
+         console.log("Target for KA: "+ trgt);
+        axios.put('http://' + trgt + '/kv-store/sync/',{'keyv':keyv}).then(
+            response => {
+                console.log("msg " + response.data.msg);
+                if (response.data.msg === "sync done") {
+                    sync = true;
+                }
+            }).catch(
+            error => {
+                if (error.response) {
+                    console.log(error.response.data);
+                } else if (error.request) {
+                    // console.log(error.request);
+                    console.log("Timeout for keepalive to  " + trgt );
+                    sync = false;
+                } else {
+                    console.log('Error', error.data);
+                }
+            });
+    }
+}, 10000);
 console.log("REPLICAS: " + replicas);
 
 
@@ -127,7 +127,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
     let key = req.params.key;
     let val = req.body.value;
     if (req.body["causal-context"] === undefined) {
-        console.log("undefined causaul context in put for k " + key + " v " + val);
+        console.log("undefined causal context in put for k " + key + " v " + val);
         res.send({"msg": "No causal context object in request"});
         return;
 
@@ -162,11 +162,14 @@ app.put('/kv-store/keys/:key', (req, res) => {
             }
         }
         let done = false;
+        let stale = false;
+        let exists = true;
         let msg = {};
         let errMsg = {};
+        let cc = {};
         console.log("shard " + tarArr + " length " + tarArr.length);
-
-        Promise.all(tarArr.map(tar => axios.put('http://' + tar + '/kv-store/keys/' + key).then(
+        Promise.all(tarArr.map(tar => axios.put('http://' + tar + '/kv-store/keys/' + key,
+            {"value": val, "causal-context": req.body["causal-context"]}).then(
             response => {
                 console.log("resp heard from " + tar);
                 if (response.data.replaced === true) {
@@ -176,7 +179,6 @@ app.put('/kv-store/keys/:key', (req, res) => {
                         "address": target,
                         "causal-context": response.data["causal-context"]
                     }
-
                 } else {
                     msg = {
                         "message": "Added successfully",
@@ -186,18 +188,23 @@ app.put('/kv-store/keys/:key', (req, res) => {
                     }
                 }
                 done = true;
-
             }).catch(
             error => {
                 console.log("error with put " + tar);
                 if (error.response) {
                     console.log("error in resp " + error.response.status);
                     res.status(error.response.status);
+                    if (error.response.status === 400) {
+                        cc = error.response.data;
+                        stale = true;
+                    } else if (error.response.status === 404) {
+                        exists = false;
+                    }
                 } else if (error.request) {
                     console.log("couldnt reach tar " + tar);
                     //console.log(error.request);
                     res.status(503);
-                    errMsg = {"msg":"shard unreachable","shard":tarArr}
+                    errMsg = {"msg": "shard unreachable", "shard": tarArr}
                 } else {
                     console.log('Error', error.message);
                 }
@@ -205,6 +212,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
 
             }))).then(
             data => {
+                console.log(data);
                 console.log("Done with all puts");
                 if (done) {
                     if (msg.replaced === false) {
@@ -214,10 +222,17 @@ app.put('/kv-store/keys/:key', (req, res) => {
                     }
                     res.send(msg);
                 } else {
-                    res.send(errMsg);
+                    if (stale) {
+                        res.status(400);
+                        res.send(cc);
+                    } else if (!exists) {
+                        res.status(404);
+                    } else {
+                        res.send(errMsg);
+                    }
                 }
             });
-        
+
     } else {
         if (req.body.value === undefined) {
             console.log("val undef.");
@@ -281,7 +296,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 keyv[req.params.key] = {"value": req.body.value, "clock": clock};
                 res.status(200);
                 res.send({
-                    "message": "Updated successfully", "replaced": true,
+                    "message": "Updated successfully", "replaced": false,
                     "causal-context": {"clock": clock, "key": req.params.key}
                 });
                 console.log("Success updating key " + req.params.key + " with cc " + req.body["causal-context"]);
@@ -366,54 +381,110 @@ app.get('/kv-store/keys/:key', (req, res) => {
         let tarArr = [];
         for (let i = 0; i < viewArr.length; i += rFactor) {
             let subArr = viewArr.slice(i, rFactor + i);
-            let idx = subArr.indexOf(target);
-            if (idx !== -1) {
-                subArr.splice(idx, 1);
+            if (subArr.includes(target)) {
                 tarArr = subArr;
                 break;
             }
         }
         let done = false;
+        let exists = false;
+        let msg = {};
+        let errMsg = {};
+        Promise.all(tarArr.map(tar => axios.get('http://' + tar + '/kv-store/keys/' + key).then(
+            response => {
+                console.log("resp heard from " + tar);
 
-        for (let i = 0; i < tarArr.length; i++) {
-            if (done) {
-                return;
-            }
-            axios.get('http://' + tarArr[i] + '/kv-store/keys/' + key).then(
-                response => {
-                    // console.log(response);
-                    if (response.data.doesExist === true) {
-                        res.send({
-                            "doesExist": true,
-                            "message": "Retrieved successfully",
-                            "value": response.data.value,
-                            "address": target,
-                            "causal-context": response.data["causal-context"]
-                        });
-                        done = true;
-                    }
-                }).catch(error => {
+                if (response.data.doesExist === true){
+                    msg = {
+                        "doesExist": true,
+                         "message": "Retrieved successfully",
+                         "value": response.data.value,
+                         "address": target,
+                         "causal-context": response.data["causal-context"]
+                    };
+                    done = true;
+                }
+
+
+
+            }).catch(
+            error => {
+                console.log("error with get " + tar);
                 if (error.response) {
-                    // The request was made and the server responded with a status code
-                    // that falls out of the range of 2xx
+                    console.log("error in resp " + error.response.status);
                     res.status(error.response.status);
-                    res.send(error.response.data);
+                    if (error.response.status ===400) {
+                        exists = false;
+                    }
                 } else if (error.request) {
-                    // The request was made but no response was received
-                    // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
-                    // http.ClientRequest in node.js
+                    console.log("couldnt reach tar " + tar);
                     //console.log(error.request);
                     res.status(503);
-                    res.send({"error": "Instance is down", "message": "Error in GET"});
+                    errMsg = {"msg": "shard unreachable", "shard": tarArr}
                 } else {
-                    // Something happened in setting up the request that triggered an Error
                     console.log('Error', error.message);
-                    res.send(error.message);
                 }
-                console.log(error.config);
+                // console.log(error.config);
+
+            }))).then(
+            data => {
+                console.log(data);
+                console.log("Done with all gets");
+                if (done) {
+                    res.send(msg);
+                } else {
+                    if (!exists) {
+                        res.status = 404;
+                        res.send({"doesExist": false,
+                                  "error": "Key does not exist",
+                                  "message": "Error in GET",
+                                  "causal-context": {}});
+                    } else {
+                        res.send(errMsg);
+                    }
+                }
 
             });
-        }
+
+        // for (let i = 0; i < tarArr.length; i++) {
+        //     if (done) {
+        //         return;
+        //     }
+        //     axios.get('http://' + tarArr[i] + '/kv-store/keys/' + key).then(
+        //         response => {
+        //             // console.log(response);
+        //             if (response.data.doesExist === true) {
+        //                 res.send({
+        //                     "doesExist": true,
+        //                     "message": "Retrieved successfully",
+        //                     "value": response.data.value,
+        //                     "address": target,
+        //                     "causal-context": response.data["causal-context"]
+        //                 });
+        //                 done = true;
+        //             }
+        //         }).catch(error => {
+        //         if (error.response) {
+        //             // The request was made and the server responded with a status code
+        //             // that falls out of the range of 2xx
+        //             res.status(error.response.status);
+        //             res.send(error.response.data);
+        //         } else if (error.request) {
+        //             // The request was made but no response was received
+        //             // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
+        //             // http.ClientRequest in node.js
+        //             //console.log(error.request);
+        //             res.status(503);
+        //             res.send({"error": "Instance is down", "message": "Error in GET"});
+        //         } else {
+        //             // Something happened in setting up the request that triggered an Error
+        //             console.log('Error', error.message);
+        //             res.send(error.message);
+        //         }
+        //         console.log(error.config);
+        //
+        //     });
+        // }
         return;
     }
 
@@ -674,39 +745,52 @@ ee.on('key-count', function (arr) {
 
 app.get('/kv-store/shards/', (req, res) => {
     let shards = [];
+    let tar = viewArr.length/rFactor;
     let s = 1;
     for (let i = 0; i < viewArr.length; i += rFactor) {
         let subArr = viewArr.slice(i, rFactor + i);
-        if (subArr[0] === ADDR) {
+        if (subArr.includes(ADDR)) {
             shards.push({"shard-id": s, "key-count": Object.keys(keyv).length, "replicas": subArr});
+            s+=1;
         } else {
             axios.get('http://' + subArr[0] + '/kv-store/key-count').then(
                 response => {
                     shards.push({"shard-id": s, "key-count": response.data["key-count"], "replicas": subArr});
-                }
-            )
-        }
+                    s+=1;
+                    if (s-1 === tar) {
+                        res.send({"msg":"Shard membership retrieved successfully","shards":shards});
+                    }
+                }).catch(
+                    error => {
+                        res.status(error.message.status);
+                        res.send(error.message);
+                    }
+            )}
     }
-    res.send({"shards": shards});
 });
 
 app.get('/kv-store/shards/:id', (req, res) => {
     let shards = [];
     let s = 1;
+    let tar = viewArr.length/rFactor;
     for (let i = 0; i < viewArr.length; i += rFactor) {
         let subArr = viewArr.slice(i, rFactor + i);
         axios.get('http://' + subArr[0] + '/kv-store/key-count').then(
             response => {
-                shards.push({"shard-id": s, "key-count": response.data["key-count"], "replicas": subArr});
+                s+=1;
+                shards.push({"msg":"Shard information retrieved successfully",
+                    "shard-id": s-1,
+                    "key-count": response.data["key-count"],
+                    "replicas": subArr,
+                    "causal-context": {} });
+                if (s-1 === tar) {
+                    res.send(shards[req.params.id - 1]);
+                }
             }
-        )
-    }
-
-    if (shards[req.params.id - 1] === undefined) {
-        res.send({"message": "Shard not found"});
-    } else {
-        res.send(shards[req.params.id - 1]);
-    }
+        ).catch(
+            error => {
+                res.send({"message": "Shard not found"});
+            })}
 });
 
 // Endpoint to trigger a rehash of all keys stored on a node
