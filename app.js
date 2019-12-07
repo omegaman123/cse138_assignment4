@@ -70,12 +70,12 @@ app.get('/kv-store/', (req, res) => {
     res.send({"keyv": keyv});
 });
 
-app.put('/kv-store/sync/',(req,res) => {
+app.put('/kv-store/sync/', (req, res) => {
     console.log("\nsyncing...");
     console.log(req.body.keyv);
     let kv = req.body.keyv;
-    if(kv === {}) {
-        res.send({"msg":"sync done"});
+    if (kv === {}) {
+        res.send({"msg": "sync done"});
         return;
     }
     Object.keys(kv).forEach(function (key) {
@@ -87,35 +87,35 @@ app.put('/kv-store/sync/',(req,res) => {
         }
     });
     sync = true;
-    res.send({"msg":"sync done"});
+    res.send({"msg": "sync done"});
 });
 
-setInterval(function () {
-    console.log("\nSending keepalive...");
-    console.log(keyv);
-    for (let i = 0; i < replicas.length; i++) {
-        let trgt = replicas[i].trim();
-         console.log("Target for KA: "+ trgt);
-        axios.put('http://' + trgt + '/kv-store/sync/',{'keyv':keyv}).then(
-            response => {
-                console.log("msg " + response.data.msg);
-                if (response.data.msg === "sync done") {
-                    sync = true;
-                }
-            }).catch(
-            error => {
-                if (error.response) {
-                    console.log(error.response.data);
-                } else if (error.request) {
-                    // console.log(error.request);
-                    console.log("Timeout for keepalive to  " + trgt );
-                    sync = false;
-                } else {
-                    console.log('Error', error.data);
-                }
-            });
-    }
-}, 10000);
+// setInterval(function () {
+//     console.log("\nSending keepalive...");
+//     console.log(keyv);
+//     for (let i = 0; i < replicas.length; i++) {
+//         let trgt = replicas[i].trim();
+//          console.log("Target for KA: "+ trgt);
+//         axios.put('http://' + trgt + '/kv-store/sync/',{'keyv':keyv}).then(
+//             response => {
+//                 console.log("msg " + response.data.msg);
+//                 if (response.data.msg === "sync done") {
+//                     sync = true;
+//                 }
+//             }).catch(
+//             error => {
+//                 if (error.response) {
+//                     console.log(error.response.data);
+//                 } else if (error.request) {
+//                     // console.log(error.request);
+//                     console.log("Timeout for keepalive to  " + trgt );
+//                     sync = false;
+//                 } else {
+//                     console.log('Error', error.data);
+//                 }
+//             });
+//     }
+// }, 1000000000000000000);
 console.log("REPLICAS: " + replicas);
 
 
@@ -156,140 +156,177 @@ app.put('/kv-store/keys/:key', (req, res) => {
         let tarArr = [];
         for (let i = 0; i < viewArr.length; i += rFactor) {
             let subArr = viewArr.slice(i, rFactor + i);
-            let idx = subArr.indexOf(target);
-            if (idx !== -1) {
-                subArr.splice(idx, 1);
+            if (subArr.includes(target)) {
                 tarArr = subArr;
                 break;
             }
         }
         let done = false;
-        for (let i = 0; i < tarArr.length; i++) {
-            if (done) {
-                return;
-            }
-            axios.put('http://' + tarArr[i] + '/kv-store/keys/' + key, {
-                "value": val, "causal-context": req.body["causal-context"]
-            }).then(
-                response => {
-                    // console.log(response);
-                    res.status(response.status);
-                    if (response.data.replaced === true) {
-                        res.send({
-                            "message": "Added successfully",
-                            "replaced": true,
-                            "address": target,
-                            "causal-context": response.data["causal-context"]
-                        });
+        let acks = 0;
+        let msg = {};
+        console.log("shard " + tarArr + " length " + tarArr.length);
 
-                    } else {
-                        res.send({
-                            "message": "Added successfully",
-                            "replaced": false,
-                            "address": target,
-                            "causal-context": response.data["causal-context"]
-                        });
+        Promise.all(tarArr.map(tar => axios.put('http://' + tar + '/kv-store/keys/' + key).then(
+            response => {
+                console.log("resp heard from " + tar);
+                if (response.data.replaced === true) {
+                    msg = {
+                        "message": "Added successfully",
+                        "replaced": true,
+                        "address": target,
+                        "causal-context": response.data["causal-context"]
                     }
-                    done = true;
-                }).catch(error => {
-                if (error.response) {
-                    res.status(error.response.status);
-                } else if (error.request) {
-                    //console.log(error.request);
-                    res.status(503);
+
                 } else {
-                    console.log('Error', error.message);
-
+                    msg = {
+                        "message": "Added successfully",
+                        "replaced": false,
+                        "address": target,
+                        "causal-context": response.data["causal-context"]
+                    }
                 }
-                // console.log(error.config);
-            });
-        }
-        if (!done){
-            if (res.status === 503) {
-              res.send({"msg":"all replicas in shard down","shard":tarArr})
-            }
-            res.send({"msg":"error"})
-        }
-        return;
-    }
-
-
-    if (req.body.value === undefined) {
-        console.log("val undef.");
-        res.status(400);
-        res.send({"error": "Value is missing", "message": "Error in PUT"});
-        return;
-    } else if (req.params.key.length > 50) {
-        res.status(400);
-        res.send({"error": "Key is too long", "message": "Error in PUT"});
-        return;
-    }
-
-    if (keyv[req.params.key] !== undefined) {
-        if (req.body["causal-context"] !== undefined) {
-            if (req.body["causal-context"].clock === undefined) {
-                res.status(400);
-                res.send({
-                    "message": "Adding failed", "replaced": false,
-                    "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
-                });
+            }).catch(
+            error => {
+            console.log("error with put " + tar);
+                msg = {"msg":"blah"}
+            }))).then(
+            data => {
+                console.log("Done with all puts");
+                res.send(msg);
                 return;
-            }
-            if (req.body["causal-context"].clock < keyv[req.params.key].clock) {
+            });
+        // for (let i = 0; i < tarArr.length-1; i++) {
+        //     console.log("put " + i + " tar " + tarArr[i]);
+        //     axios.put('http://' + tarArr[i] + '/kv-store/keys/' + key, {
+        //         "value": val, "causal-context": req.body["causal-context"]
+        //     }).then(
+        //         response => {
+        //             console.log("resp heard from " + tarArr[i]);
+        //             // console.log(response);
+        //
+        //             res.status(response.status);
+        //             if (response.data.replaced === true) {
+        //                 msg = {
+        //                     "message": "Added successfully",
+        //                     "replaced": true,
+        //                     "address": target,
+        //                     "causal-context": response.data["causal-context"]
+        //                 }
+        //
+        //             } else {
+        //                 msg = {
+        //                     "message": "Added successfully",
+        //                     "replaced": false,
+        //                     "address": target,
+        //                     "causal-context": response.data["causal-context"]
+        //                 }
+        //             }
+        //             acks +=1;
+        //             done = true;
+        //             if (acks === tarArr.length){
+        //                 res.send(msg);
+        //             }
+        //         }).catch(error => {
+        //             acks +=1;
+        //             console.log("error in put ");
+        //         if (error.response) {
+        //             console.log("error in resp " + error.response.status);
+        //             res.status(error.response.status);
+        //         } else if (error.request) {
+        //             console.log("couldnt reach tar " + tarArr[i]);
+        //             //console.log(error.request);
+        //             res.status(503);
+        //         } else {
+        //             console.log('Error', error.message);
+        //         }
+        //         // console.log(error.config);
+        //         if (acks === tarArr.length){
+        //             if (done){
+        //                 res.send(msg);
+        //             } else {
+        //              console.log("All puts failed for shard " + tarArr);
+        //             }
+        //         }
+        //     });
+        // }
+    } else {
+        if (req.body.value === undefined) {
+            console.log("val undef.");
+            res.status(400);
+            res.send({"error": "Value is missing", "message": "Error in PUT"});
+            return;
+        } else if (req.params.key.length > 50) {
+            res.status(400);
+            res.send({"error": "Key is too long", "message": "Error in PUT"});
+            return;
+        }
+
+        if (keyv[req.params.key] !== undefined) {
+            if (req.body["causal-context"] !== undefined) {
+                if (req.body["causal-context"].clock === undefined) {
+                    res.status(400);
+                    res.send({
+                        "message": "Adding failed", "replaced": false,
+                        "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
+                    });
+                    return;
+                }
+                if (req.body["causal-context"].clock < keyv[req.params.key].clock) {
+                    res.status(400);
+                    res.send({
+                        "message": "Adding failed", "replaced": false,
+                        "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
+                    });
+                    console.log("Adding key " + req.params.key + " failed with cc " +
+                        req.body["causal-context"].clock +
+                        " which is less than current cc " + keyv[req.params.key].clock);
+
+                } else {
+                    let clock = req.body["causal-context"].clock + 1;
+                    keyv[req.params.key] = {"value": req.body.value, "clock": clock};
+                    res.status(200);
+                    res.send({
+                        "message": "Updated successfully", "replaced": true,
+                        "causal-context": {"clock": clock, "key": req.params.key}
+                    });
+                    console.log("Success adding key " + req.params.key + " with cc " + req.body["causal-context"]);
+                    ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
+                }
+                return;
+            } else {
                 res.status(400);
                 res.send({
                     "message": "Adding failed", "replaced": false,
                     "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
                 });
-                console.log("Adding key " + req.params.key + " failed with cc " +
+                console.log("Adding key " + req.params.key + " failed with undefined cc " +
                     req.body["causal-context"].clock +
                     " which is less than current cc " + keyv[req.params.key].clock);
-
-            } else {
-                let clock = req.body["causal-context"].clock + 1;
+            }
+        } else {
+            if (req.body["causal-context"] !== undefined) {
+                let clock = 1;
+                if (req.body["causal-context"].clock !== undefined) {
+                    clock = req.body["causal-context"].clock + 1;
+                }
                 keyv[req.params.key] = {"value": req.body.value, "clock": clock};
                 res.status(200);
                 res.send({
                     "message": "Updated successfully", "replaced": true,
                     "causal-context": {"clock": clock, "key": req.params.key}
                 });
-                console.log("Success adding key " + req.params.key + " with cc " + req.body["causal-context"]);
+                console.log("Success updating key " + req.params.key + " with cc " + req.body["causal-context"]);
+                ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
+            } else {
+                keyv[req.params.key] = {"value": req.body.value, "clock": 1};
+                res.status(201);
+                res.send({
+                    "message": "Added successfully", "replaced": false,
+                    "causal-context": {"clock": 1, "key": req.params.key}
+                });
+                console.log("Success adding NEW key " + req.params.key + " with cc " + req.body["causal-context"]);
                 ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
             }
-            return;
-        } else {
-            res.status(400);
-            res.send({
-                "message": "Adding failed", "replaced": false,
-                "causal-context": {"clock": keyv[req.params.key].clock, "key": req.params.key}
-            });
-            console.log("Adding key " + req.params.key + " failed with undefined cc " +
-                req.body["causal-context"].clock +
-                " which is less than current cc " + keyv[req.params.key].clock);
-        }
-    } else {
-        if (req.body["causal-context"] !== undefined) {
-            let clock = 1;
-            if (req.body["causal-context"].clock !== undefined) {
-                clock = req.body["causal-context"].clock + 1;
-            }
-            keyv[req.params.key] = {"value": req.body.value, "clock": clock};
-            res.status(200);
-            res.send({
-                "message": "Updated successfully", "replaced": true,
-                "causal-context": {"clock": clock, "key": req.params.key}
-            });
-            console.log("Success updating key " + req.params.key + " with cc " + req.body["causal-context"]);
-            ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
-        } else {
-            keyv[req.params.key] = {"value": req.body.value, "clock": 1};
-            res.status(201);
-            res.send({
-                "message": "Added successfully", "replaced": false,
-                "causal-context": {"clock": 1, "key": req.params.key}
-            });
-            console.log("Success adding NEW key " + req.params.key + " with cc " + req.body["causal-context"]);
-            ee.emit('gossip', {"key": req.params.key, "value": req.body.value, "clock": clock});
         }
     }
 });
@@ -369,7 +406,7 @@ app.get('/kv-store/keys/:key', (req, res) => {
         }
         let done = false;
 
-        for(let i = 0; i < tarArr.length; i++) {
+        for (let i = 0; i < tarArr.length; i++) {
             if (done) {
                 return;
             }
