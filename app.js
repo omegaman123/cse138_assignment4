@@ -115,7 +115,8 @@ setInterval(function () {
                 }
             });
     }
-}, 10000);
+}, 3000);
+
 console.log("REPLICAS: " + replicas);
 
 
@@ -174,7 +175,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 console.log("resp heard from " + tar);
                 if (response.data.replaced === true) {
                     msg = {
-                        "message": "Added successfully",
+                        "message": "Updated successfully",
                         "replaced": true,
                         "address": target,
                         "causal-context": response.data["causal-context"]
@@ -296,7 +297,7 @@ app.put('/kv-store/keys/:key', (req, res) => {
                 keyv[req.params.key] = {"value": req.body.value, "clock": clock};
                 res.status(200);
                 res.send({
-                    "message": "Updated successfully", "replaced": false,
+                    "message": "Added successfully", "replaced": false,
                     "causal-context": {"clock": clock, "key": req.params.key}
                 });
                 console.log("Success updating key " + req.params.key + " with cc " + req.body["causal-context"]);
@@ -445,46 +446,6 @@ app.get('/kv-store/keys/:key', (req, res) => {
                 }
 
             });
-
-        // for (let i = 0; i < tarArr.length; i++) {
-        //     if (done) {
-        //         return;
-        //     }
-        //     axios.get('http://' + tarArr[i] + '/kv-store/keys/' + key).then(
-        //         response => {
-        //             // console.log(response);
-        //             if (response.data.doesExist === true) {
-        //                 res.send({
-        //                     "doesExist": true,
-        //                     "message": "Retrieved successfully",
-        //                     "value": response.data.value,
-        //                     "address": target,
-        //                     "causal-context": response.data["causal-context"]
-        //                 });
-        //                 done = true;
-        //             }
-        //         }).catch(error => {
-        //         if (error.response) {
-        //             // The request was made and the server responded with a status code
-        //             // that falls out of the range of 2xx
-        //             res.status(error.response.status);
-        //             res.send(error.response.data);
-        //         } else if (error.request) {
-        //             // The request was made but no response was received
-        //             // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
-        //             // http.ClientRequest in node.js
-        //             //console.log(error.request);
-        //             res.status(503);
-        //             res.send({"error": "Instance is down", "message": "Error in GET"});
-        //         } else {
-        //             // Something happened in setting up the request that triggered an Error
-        //             console.log('Error', error.message);
-        //             res.send(error.message);
-        //         }
-        //         console.log(error.config);
-        //
-        //     });
-        // }
         return;
     }
 
@@ -687,6 +648,16 @@ ee.on('message', function (arr) {
                     // The request was made and the server responded with a status code
                     // that falls out of the range of 2xx
                     console.log(error.response.data);
+                    if (error.response.status === 400) {
+                        if (error.response.data.msg === "DONE") {
+                            acks[adr] = "OK";
+                            if (Object.keys(acks).length === arr.length) {
+                                // console.log("ACKS: " + acks);
+                                console.log("Emitting event rehash...");
+                                ee.emit('key-count', arr);
+                            }
+                        }
+                    }
                     // res.send(error.response.data);
                 } else if (error.request) {
                     // The request was made but no response was received
@@ -736,7 +707,6 @@ ee.on('key-count', function (arr) {
                     // Something happened in setting up the request that triggered an Error
                     console.log('Error', error.message);
                 }
-                ee.emit('error', error);
             });
 
     });
@@ -784,6 +754,7 @@ app.get('/kv-store/shards/:id', (req, res) => {
                     "replicas": subArr,
                     "causal-context": {} });
                 if (s-1 === tar) {
+                    console.log(shards);
                     res.send(shards[req.params.id - 1]);
                 }
             }
@@ -814,15 +785,17 @@ app.put('/kv-store/rehash/', (req, res) => {
         console.log("HASH: " + hash + " IDX: " + idx + " TARGET :" + target);
 
 
-        if (target === ADDR) {
+        if (target === ADDR || replicas.includes(target)) {
             count += 1;
             return;
         }
 
         // Send out a put request to newly hashed address, delete key from own store upon ack
-        axios.put('http://' + target + '/kv-store/keys/' + key, {"value": keyv[key]}).then(
+        axios.put('http://' + target + '/kv-store/keys/' + key, {"value": keyv[key].value,
+            "causal-context":{"key":key,"clock":keyv[key].clock-1}}).then(
             response => {
                 console.log(response.data);
+                console.log("deleting key " + key + " with val " + keyv[key]);
                 delete keyv[key];
                 count += 1;
                 if (count === nKeys) {
@@ -833,10 +806,26 @@ app.put('/kv-store/rehash/', (req, res) => {
             }).catch(
             error => {
                 if (error.response) {
+                    console.log("err in rehash put"  + error.response.status);
+                    console.log(error.response.data);
+                    if (error.response.status === 400 && error.response.data.message==="Adding failed"){
+                            console.log("deleting key " + key + " with val " + keyv[key]);
+                            delete keyv[key];
+                        count += 1;
+                        if (count === nKeys) {
+                            console.log("NUMKEYS: " + nKeys);
+                            try {
+                                res.send({"msg": "DONE", "NUMKEYS": Object.keys(keyv).length});
+                            } catch (e) {
+                                console.log("exception sending msg " + e);
+                            }
+
+                            return;
+                        }
+                    }
                     // The request was made and the server responded with a status code
                     // that falls out of the range of 2xx
                     res.status(error.response.status);
-                    res.send(error.response.data);
                 } else if (error.request) {
                     // The request was made but no response was received
                     // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
@@ -854,12 +843,6 @@ app.put('/kv-store/rehash/', (req, res) => {
             });
 
     });
-
-    if (count === nKeys) {
-        console.log("NUMKEYS: " + nKeys);
-        res.send({"msg": "DONE", "NUMKEYS": Object.keys(keyv).length});
-        return;
-    }
 
 });
 
