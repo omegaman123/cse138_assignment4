@@ -72,6 +72,33 @@ app.put('/kv-store/sync/', (req, res) => {
 
 //
 
+setInterval(function () {
+    console.log("\nSending keepalive...");
+    console.log(keyv);
+    for (let i = 0; i < replicas.length; i++) {
+        let trgt = replicas[i].trim();
+        console.log("Target for KA: "+ trgt);
+        axios.put('http://' + trgt + '/kv-store/sync/',{'keyv':keyv}).then(
+            response => {
+                console.log("msg " + response.data.msg);
+                if (response.data.msg === "sync done") {
+                    sync = true;
+                }
+            }).catch(
+            error => {
+                if (error.response) {
+                    console.log(error.response.data);
+                } else if (error.request) {
+                    // console.log(error.request);
+                    console.log("Timeout for keepalive to  " + trgt );
+                    sync = false;
+                } else {
+                    console.log('Error', error.data);
+                }
+            });
+    }
+}, 3000);
+
 console.log("REPLICAS: " + replicas);
 
 
@@ -566,7 +593,7 @@ app.put('/kv-store/view-change/', (req, res) => {
         ee.once('rehash', function (viewResult) {
             console.log("rehash done...");
             try {
-                res.send({"message": "View change successful", "shards": viewResult});
+                res.send({"message": "View change successful","causal-context":{}, "shards": viewResult});
 
             } catch (e) {
                 console.log("EXCEPTION : " + e.stack);
