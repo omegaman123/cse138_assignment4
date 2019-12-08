@@ -46,26 +46,6 @@ for (let i = 0; i < viewArr.length; i += rFactor) {
     }
 }
 
-// replicas.forEach((adr) => {
-//     axios.get('http://' + adr + '/kv-store/', {timeout: 2000}).then(
-//         response => {
-//             keyv = response.body.keyv;
-//         }).catch(
-//         error => {
-//             console.log("Error asking database from replica on startup from address : " + adr);
-//             if (error.response) {
-//                 console.log(error.response.data);
-//             } else if (error.request) {
-//                 // console.log(error.request);
-//                 console.log("Timeout asking replica " + adr + " on startup");
-//                 sync = false;
-//             } else {
-//                 console.log('Error', error.data);
-//             }
-//         });
-// });
-
-
 app.get('/kv-store/', (req, res) => {
     res.send({"keyv": keyv});
 });
@@ -90,32 +70,7 @@ app.put('/kv-store/sync/', (req, res) => {
     res.send({"msg": "sync done"});
 });
 
-setInterval(function () {
-    console.log("\nSending keepalive...");
-    console.log(keyv);
-    for (let i = 0; i < replicas.length; i++) {
-        let trgt = replicas[i].trim();
-         console.log("Target for KA: "+ trgt);
-        axios.put('http://' + trgt + '/kv-store/sync/',{'keyv':keyv}).then(
-            response => {
-                console.log("msg " + response.data.msg);
-                if (response.data.msg === "sync done") {
-                    sync = true;
-                }
-            }).catch(
-            error => {
-                if (error.response) {
-                    console.log(error.response.data);
-                } else if (error.request) {
-                    // console.log(error.request);
-                    console.log("Timeout for keepalive to  " + trgt );
-                    sync = false;
-                } else {
-                    console.log('Error', error.data);
-                }
-            });
-    }
-}, 3000);
+//
 
 console.log("REPLICAS: " + replicas);
 
@@ -677,40 +632,32 @@ ee.on('message', function (arr) {
 
 ee.on('key-count', function (arr) {
     console.log("Beginning keycount requests...");
-    let nodeNum = [];
-    arr.forEach(function (adr) {
-        console.log("Asking " + adr + " for key count...");
-        axios.get('http://' + adr + '/kv-store/key-count').then(
-            response => {
-                console.log(response.data);
-                if (response.data.message === "Key count retrieved successfully") {
-                    nodeNum.push({"address": adr, "key-count": response.data["key-count"]});
+    let shards = [];
+    let tar = viewArr.length/rFactor;
+    let s = 1;
+    for (let i = 0; i < viewArr.length; i += rFactor) {
+        let subArr = viewArr.slice(i, rFactor + i);
+        if (subArr.includes(ADDR)) {
+            shards.push({"shard-id": s, "key-count": Object.keys(keyv).length, "replicas": subArr});
+            s+=1;
+        } else {
+            axios.get('http://' + subArr[0] + '/kv-store/key-count').then(
+                response => {
+                    shards.push({"shard-id": s, "key-count": response.data["key-count"], "replicas": subArr});
+                    s+=1;
+                    if (s-1 === tar) {
+                        ee.emit('rehash', shards);
+                    }
+                }).catch(
+                error => {
+                    console.log("error in keycount event " + error.response.status);
+                    ee.emit('rehash', shards);
                 }
-                if (Object.keys(nodeNum).length === arr.length) {
-                    ee.emit('rehash', nodeNum);
-                }
-            }).catch(
-            error => {
-                if (error.response) {
-                    // The request was made and the server responded with a status code
-                    // that falls out of the range of 2xx
-                    console.log(error.response.data);
-                    // res.send(error.response.data);
-                } else if (error.request) {
-                    // The request was made but no response was received
-                    // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
-                    // http.ClientRequest in node.js
-                    //console.log(error.request);
-                    console.log({"error": "Instance is down", "message": "Error in VIEW-CHANGE"});
+            )}
+    }
 
-                } else {
-                    // Something happened in setting up the request that triggered an Error
-                    console.log('Error', error.message);
-                }
-            });
-
-    });
 });
+
 
 
 app.get('/kv-store/shards/', (req, res) => {
@@ -728,7 +675,7 @@ app.get('/kv-store/shards/', (req, res) => {
                     shards.push({"shard-id": s, "key-count": response.data["key-count"], "replicas": subArr});
                     s+=1;
                     if (s-1 === tar) {
-                        res.send({"msg":"Shard membership retrieved successfully","shards":shards});
+                        res.send({"message":"Shard membership retrieved successfully","shards":shards});
                     }
                 }).catch(
                     error => {
@@ -748,7 +695,7 @@ app.get('/kv-store/shards/:id', (req, res) => {
         axios.get('http://' + subArr[0] + '/kv-store/key-count').then(
             response => {
                 s+=1;
-                shards.push({"msg":"Shard information retrieved successfully",
+                shards.push({"message":"Shard information retrieved successfully",
                     "shard-id": s-1,
                     "key-count": response.data["key-count"],
                     "replicas": subArr,
